@@ -66,12 +66,10 @@ class SignalBus:
                 logger.error("Failed reading bus (%s) — returning template.", exc)
         return self._normalize_bus(bus)
 
-    def update(self, scan_results: Dict[str, Any]) -> None:
-        """Merge scan results into the bus and write atomically."""
-        bus = self.get_signals()
-        bus.update(scan_results)
-        bus = self._normalize_bus(bus)
-        self._atomic_write(bus)
+    def update(self, **kwargs):
+        bus = self.read() if hasattr(self, "read") else {}
+        bus.update(kwargs)
+        self.write(bus)
 
     def expire_old_signals(self, max_age_hours: int = DEFAULT_MAX_AGE_HOURS) -> int:
         """Drop signals whose ``expires_at`` (or age) exceeds the window."""
