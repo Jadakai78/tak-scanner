@@ -1,0 +1,68 @@
+{
+  "last_scan": "",
+  "next_scan": "",
+  "active_pairs": 0,
+  "sprint_mode": false,
+  "quiet_hours": false,
+  "fg": {
+    "score": null,
+    "label": "Unknown"
+  },
+  "session_stats": {
+    "signals_fired": 0,
+    "signals_killed": 0,
+    "s_grade_count": 0,
+    "scan_duration_sec": 0.0
+  },
+  "regime_map": {},
+  "pair_universe": [],
+  "signals": [],
+  "killed_signals": [],
+  "open_positions": [],
+  "accounts": [
+    {
+      "name": "Prop 4 - DRAGON ($25K)",
+      "account_id": "prop_4_dragon",
+      "mode": "FULL_AGGRESSION",
+      "baseline": 24193,
+      "current_equity": 24193,
+      "recommended_risk_per_trade": 350,
+      "tier": "TIER_A",
+      "gap_to_target": -3807,
+      "sprint_mode": true
+    },
+    {
+      "name": "Prop 3 - $10K",
+      "account_id": "prop_3_10k",
+      "mode": "NORMAL",
+      "baseline": 9726,
+      "current_equity": 9726,
+      "recommended_risk_per_trade": 150,
+      "tier": "TIER_A",
+      "gap_to_target": -1274,
+      "sprint_mode": false
+    },
+    {
+      "name": "Prop 2 - $10K",
+      "account_id": "prop_2_10k",
+      "mode": "CONSERVATIVE",
+      "baseline": 9730,
+      "current_equity": 9730,
+      "recommended_risk_per_trade": 100,
+      "tier": "TIER_B",
+      "gap_to_target": -1270,
+      "sprint_mode": false
+    },
+    {
+      "name": "Prop 1 - $5K",
+      "account_id": "prop_1_5k",
+      "mode": "SUPER_CONSERVATIVE",
+      "baseline": 4817,
+      "current_equity": 4817,
+      "recommended_risk_per_trade": 50,
+      "tier": "TIER_B",
+      "gap_to_target": -783,
+      "sprint_mode": false
+    }
+  ]
+}

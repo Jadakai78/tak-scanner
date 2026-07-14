@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>JHL Live Feed – Minimal Tester</title>
+  <style>
+    body { background:#05080f; color:#f5f7ff; font-family:system-ui, -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif; margin:0; padding:24px; }
+    .grid { display:grid; grid-template-columns:2fr 1fr; gap:16px; }
+    .card { background:#070b14; border-radius:10px; padding:14px 16px; border:1px solid #151b2a; box-shadow:0 0 0 1px #050814; }
+    .card h2 { font-size:12px; letter-spacing:0.12em; text-transform:uppercase; color:#7b88a8; margin:0 0 6px; }
+    .row { display:flex; gap:12px; margin:6px 0; font-size:13px; color:#c4c9dd; }
+    .row span.label { color:#7b88a8; min-width:110px; }
+    .badge { display:inline-flex; align-items:center; padding:2px 8px; border-radius:999px; font-size:11px; border:1px solid #1f2840; background:#050914; color:#9ee2ff; }
+    .accounts { display:flex; flex-direction:column; gap:8px; margin-top:6px; }
+    .account-card { border-radius:8px; padding:8px 10px; background:#050914; border:1px solid #151b2a; }
+    .account-top { display:flex; justify-content:space-between; align-items:center; margin-bottom:4px; font-size:13px; }
+    .account-name { font-weight:500; color:#e2e6ff; }
+    .mode-badge { font-size:11px; padding:2px 6px; border-radius:999px; border:1px solid #2b8a3e; color:#9ff2b5; }
+    .account-meta { display:flex; gap:14px; font-size:12px; color:#9aa3c2; }
+    .account-meta b { color:#e2e6ff; font-weight:500; }
+    .signals { display:flex; flex-direction:column; gap:8px; margin-top:6px; max-height:360px; overflow:auto; }
+    .signal-card { border-radius:8px; padding:8px 10px; background:#050914; border:1px solid #151b2a; font-size:12px; }
+    .sig-top { display:flex; justify-content:space-between; align-items:center; margin-bottom:4px; }
+    .sig-pair { font-weight:500; letter-spacing:0.08em; text-transform:uppercase; color:#e2e6ff; }
+    .sig-bias { font-size:11px; padding:2px 6px; border-radius:999px; border:1px solid #2b364f; }
+    .sig-bias.short { border-color:#e55353; color:#ffc2c2; }
+    .sig-bias.long { border-color:#2ea043; color:#a5f5b4; }
+    .grade { font-size:11px; padding:2px 6px; border-radius:999px; border:1px solid #444b63; color:#e4defc; }
+    .sig-meta { display:flex; flex-wrap:wrap; gap:10px; margin-bottom:4px; color:#9aa3c2; }
+    .sig-meta b { color:#e2e6ff; font-weight:500; }
+    .sig-note { color:#7b88a8; font-size:11px; }
+    .status { font-size:12px; color:#7b88a8; margin-bottom:10px; }
+    .pill { display:inline-flex; align-items:center; padding:2px 8px; border-radius:999px; font-size:11px; border:1px solid #363f5f; margin-left:6px; }
+  </style>
+</head>
+<body>
+  <div class="status">
+    Minimal tester · polling <code>/api/signals</code> every 15s
+    <span id="conn" class="pill">connecting…</span>
+  </div>
+  <div class="grid">
+    <div>
+      <div class="card">
+        <h2>Scan overview</h2>
+        <div class="row"><span class="label">Last scan</span><span id="last-scan">–</span></div>
+        <div class="row"><span class="label">Next scan</span><span id="next-scan">–</span></div>
+        <div class="row"><span class="label">Active pairs</span><span id="active-pairs">0</span></div>
+        <div class="row"><span class="label">Signals fired</span><span id="signals-fired">0</span></div>
+        <div class="row"><span class="label">Signals killed</span><span id="signals-killed">0</span></div>
+        <div class="row"><span class="label">Fear &amp; greed</span><span id="fg">–</span></div>
+      </div>
+      <div class="card" style="margin-top:12px;">
+        <h2>Live signals</h2>
+        <div id="signals" class="signals"></div>
+      </div>
+    </div>
+    <div>
+      <div class="card">
+        <h2>Accounts</h2>
+        <div id="accounts" class="accounts"></div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const SEAT_DEFS = [
+      { key: "eval_4_25k", label: "Eval 4 $25K DRAGON" },
+      { key: "starter_3_10k", label: "Starter 3 $10K" },
+      { key: "starter_2_10k", label: "Starter 2 $10K" },
+      { key: "eval_1_5k", label: "Eval 1 $5K" }
+    ];
+
+    function normalizeBus(raw) {
+      const f_g = raw.f_g || raw.fg || { score: null, label: null };
+      return {
+        f_g,
+        last_scan: raw.last_scan || raw.lastscan || null,
+        next_scan: raw.next_scan || raw.nextscan || null,
+        active_pairs: raw.active_pairs ?? raw.activepairs ?? 0,
+        signals: Array.isArray(raw.signals) ? raw.signals : [],
+        killed_signals: Array.isArray(raw.killed_signals)
+          ? raw.killed_signals
+          : Array.isArray(raw.killedsignals)
+            ? raw.killedsignals
+            : [],
+        open_positions: Array.isArray(raw.open_positions)
+          ? raw.open_positions
+          : Array.isArray(raw.openpositions)
+            ? raw.openpositions
+            : [],
+        regime_map: raw.regime_map || raw.regimemap || {},
+        sprint_mode: !!(raw.sprint_mode ?? raw.sprintmode),
+        quiet_hours: !!(raw.quiet_hours ?? raw.quiethours),
+        session_stats: raw.session_stats || raw.sessionstats || {},
+        session_baselines: raw.session_baselines || raw.sessionbaselines || {},
+        accounts: Array.isArray(raw.accounts) ? raw.accounts : []
+      };
+    }
+
+    function esc(x) {
+      return (x == null ? "" : String(x))
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;");
+    }
+
+    function num(x, d) {
+      if (x == null || Number.isNaN(x)) return "–";
+      return Number(x).toFixed(d ?? 2);
+    }
+
+    function setConn(status, label) {
+      const el = document.getElementById("conn");
+      el.textContent = label;
+      if (status === "live") el.style.borderColor = "#2ea043";
+      else if (status === "stale") el.style.borderColor = "#c69026";
+      else el.style.borderColor = "#444b63";
+    }
+
+    function renderOverview(bus) {
+      document.getElementById("last-scan").textContent = bus.last_scan || "–";
+      document.getElementById("next-scan").textContent = bus.next_scan || "–";
+      document.getElementById("active-pairs").textContent = bus.active_pairs;
+      const stats = bus.session_stats || {};
+      document.getElementById("signals-fired").textContent = stats.signals_fired ?? "–";
+      document.getElementById("signals-killed").textContent = stats.signals_killed ?? "–";
+      const fg = bus.f_g || {};
+      document.getElementById("fg").textContent = fg.score != null ? `${fg.score} · ${fg.label || ""}` : "–";
+    }
+
+    function renderAccounts(accounts, baselines) {
+      const el = document.getElementById("accounts");
+      el.innerHTML = "";
+      if (!Array.isArray(accounts) || !accounts.length) {
+        el.innerHTML = '<div class="sig-note">No account data.</div>';
+        return;
+      }
+      const byId = new Map(accounts.map(a => [a.account_id, a]));
+      el.innerHTML = SEAT_DEFS.map(def => {
+        const a = byId.get(def.key);
+        if (!a) return "";
+        const base = baselines && baselines[def.key];
+        return `
+          <div class="account-card">
+            <div class="account-top">
+              <span class="account-name">${esc(a.name || def.label)}</span>
+              <span class="mode-badge">${esc(a.mode || "FULL_AGGRESSION")}</span>
+            </div>
+            <div class="account-meta">
+              <span>baseline <b>${num(a.baseline ?? base, 2)}</b></span>
+              <span>equity <b>${num(a.current_equity, 2)}</b></span>
+              <span>risk/trade <b>$${num(a.recommended_risk_per_trade, 2)}</b></span>
+            </div>
+          </div>`;
+      }).join("");
+    }
+
+    function renderSignals(list) {
+      const el = document.getElementById("signals");
+      if (!Array.isArray(list) || !list.length) {
+        el.innerHTML = '<div class="sig-note">No live signals.</div>';
+        return;
+      }
+      el.innerHTML = list.map(s => {
+        const bias = String(s.bias || "").toUpperCase();
+        const biasCls = bias === "SHORT" ? "short" : bias === "LONG" ? "long" : "";
+        return `
+          <div class="signal-card">
+            <div class="sig-top">
+              <span class="sig-pair">${esc(s.pair)}</span>
+              <span class="sig-bias ${biasCls}">${esc(bias || "?")}</span>
+            </div>
+            <div class="sig-meta">
+              <span>engine <b>${esc(s.engine)}</b></span>
+              <span>grade <b>${esc(s.grade)}</b></span>
+              <span>conv <b>${num(s.final_conviction ?? s.conviction, 2)}</b></span>
+              <span>RR <b>${num(s.rr, 2)}</b></span>
+              <span>regime <b>${esc(s.regime)}</b></span>
+            </div>
+            <div class="sig-meta">
+              <span>entry <b>${num(s.entry, 6)}</b></span>
+              <span>stop <b>${num(s.sl, 6)}</b></span>
+              <span>target <b>${num(s.tp, 6)}</b></span>
+            </div>
+            <div class="sig-note">${esc(s.action_state || "")} · ${esc(s.action_state_reason || s.wait_reason || "")}</div>
+          </div>`;
+      }).join("");
+    }
+
+    async function poll() {
+      try {
+        const res = await fetch("/api/signals", { cache: "no-store" });
+        if (!res.ok) throw new Error("HTTP " + res.status);
+        const raw = await res.json();
+        const bus = normalizeBus(raw);
+        renderOverview(bus);
+        renderAccounts(bus.accounts, bus.session_baselines);
+        renderSignals(bus.signals);
+        const ts = bus.last_scan ? new Date(bus.last_scan).getTime() : 0;
+        const age = ts ? Date.now() - ts : Infinity;
+        if (age < 5 * 60 * 1000) setConn("live", "live · " + (bus.last_scan || ""));
+        else if (isFinite(age)) setConn("stale", "stale · " + (bus.last_scan || ""));
+        else setConn("off", "no scan data");
+      } catch (err) {
+        console.error("poll error", err);
+        setConn("off", "error talking to /api/signals");
+      }
+    }
+
+    poll();
+    setInterval(poll, 15000);
+  </script>
+</body>
+</html>
