@@ -134,7 +134,7 @@ class TakScannerV3:
         self.scorer = ConvictionScorer()
         self.remi = Remi()
         self.bus = SignalBus()
-        self.s8 = S8MTFConfluence(fetch_ohlc=self.universe.fetch_ohlc, aisupertrend=self.aist)
+        self.s8 = S8MTFConfluence(fetch_ohlc=self.universe.fetch_ohlc, ai_supertrend=self.aist)
 
     def fetch_fg(self) -> Dict[str, Any]:
         try:
