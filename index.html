@@ -1,0 +1,662 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>JHL Holdings — Command Cockpit</title>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#0d1117;--surface:#161b22;--surface2:#1c2330;--border:#30363d;
+  --text:#e6edf3;--muted:#8b949e;--green:#3fb950;--green-dim:#1a4a2a;
+  --yellow:#d29922;--yellow-dim:#3d2f0a;--red:#f85149;--red-dim:#4a1a1a;
+  --blue:#58a6ff;--teal:#39d0c8;--teal-dim:#0d2e2d;--orange:#f0883e;
+  --purple:#bc8cff;--font:'Segoe UI',system-ui,sans-serif;
+}
+html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--font);font-size:14px}
+.app{display:flex;height:100vh;overflow:hidden}
+.sidebar{width:200px;min-width:200px;background:var(--surface);border-right:1px solid var(--border);display:flex;flex-direction:column;padding:16px 0}
+.sidebar-logo{padding:0 16px 20px;font-size:18px;font-weight:700;color:var(--teal);letter-spacing:1px}
+.sidebar-logo span{color:var(--muted);font-size:11px;display:block;font-weight:400;margin-top:2px}
+.nav-item{padding:10px 16px;cursor:pointer;color:var(--muted);font-size:13px;border-left:3px solid transparent;transition:all .15s;display:flex;align-items:center;gap:8px}
+.nav-item:hover{background:var(--surface2);color:var(--text)}
+.nav-item.active{color:var(--teal);border-left-color:var(--teal);background:var(--teal-dim)}
+.nav-section{padding:16px 16px 6px;font-size:10px;text-transform:uppercase;letter-spacing:1px;color:var(--muted)}
+.sidebar-footer{margin-top:auto;padding:12px 16px;font-size:11px;color:var(--muted);border-top:1px solid var(--border)}
+.main{flex:1;display:flex;flex-direction:column;overflow:hidden}
+.topbar{display:flex;align-items:center;background:var(--surface);border-bottom:1px solid var(--border);padding:0 20px;height:48px;flex-shrink:0}
+.tab{padding:0 20px;height:48px;display:flex;align-items:center;cursor:pointer;font-size:13px;font-weight:600;color:var(--muted);border-bottom:2px solid transparent;transition:all .15s;letter-spacing:.5px}
+.tab:hover{color:var(--text)}
+.tab.active{color:var(--teal);border-bottom-color:var(--teal)}
+.topbar-right{margin-left:auto;display:flex;align-items:center;gap:12px;font-size:12px;color:var(--muted)}
+.pulse{width:8px;height:8px;border-radius:50%;background:var(--green);animation:pulse 2s infinite}
+@keyframes pulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.4;transform:scale(1.3)}}
+.content{flex:1;overflow-y:auto;padding:20px}
+.tab-panel{display:none}.tab-panel.active{display:block}
+.stat-row{display:flex;gap:12px;margin-bottom:20px;flex-wrap:wrap}
+.stat-card{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:12px 16px;flex:1;min-width:120px}
+.stat-label{font-size:10px;text-transform:uppercase;letter-spacing:1px;color:var(--muted);margin-bottom:4px}
+.stat-value{font-size:20px;font-weight:700;color:var(--text)}
+.stat-value.green{color:var(--green)}.stat-value.yellow{color:var(--yellow)}
+.stat-value.red{color:var(--red)}.stat-value.teal{color:var(--teal)}
+.section-header{font-size:11px;text-transform:uppercase;letter-spacing:1px;color:var(--muted);margin-bottom:12px;margin-top:4px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+.cards-grid{display:grid;gap:14px;grid-template-columns:repeat(auto-fill,minmax(340px,1fr))}
+.signal-card{background:var(--surface);border:1px solid var(--border);border-radius:10px;overflow:hidden;transition:border-color .2s}
+.signal-card:hover{border-color:var(--teal)}
+.signal-card.match{border-left:4px solid var(--green)}
+.signal-card.wait{border-left:4px solid var(--yellow)}
+.signal-card.fail{border-left:4px solid var(--red);opacity:.6}
+.card-header{padding:12px 14px 10px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--border)}
+.card-pair{font-size:15px;font-weight:700;color:var(--text)}
+.card-meta{display:flex;align-items:center;gap:6px}
+.card-grade{font-size:11px;font-weight:700;padding:2px 7px;border-radius:4px;background:#2a1f0a;color:var(--yellow)}
+.card-grade.s{background:#1a3a1a;color:var(--green)}
+.card-bias{font-size:11px;font-weight:700;padding:2px 8px;border-radius:4px;letter-spacing:.5px}
+.card-bias.long{background:#1a4a2a;color:var(--green)}
+.card-bias.short{background:#4a1a1a;color:var(--red)}
+.card-body{padding:12px 14px}
+.verdict-pill{display:inline-flex;align-items:center;gap:6px;padding:5px 12px;border-radius:20px;font-size:12px;font-weight:700;letter-spacing:.5px;margin-bottom:10px}
+.verdict-pill.match{background:var(--green-dim);color:var(--green)}
+.verdict-pill.wait{background:var(--yellow-dim);color:var(--yellow)}
+.verdict-pill.fail{background:var(--red-dim);color:var(--red)}
+.readiness{display:flex;align-items:center;gap:8px;font-size:12px;margin-bottom:10px;background:var(--surface2);padding:6px 10px;border-radius:6px}
+.readiness-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
+.readiness-dot.green{background:var(--green)}
+.readiness-dot.yellow{background:var(--yellow)}
+.readiness-dot.red{background:var(--red)}
+.readiness-time{font-weight:700;color:var(--text);font-size:14px}
+.readiness-label{color:var(--muted);margin-left:auto}
+.metrics-row{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-bottom:10px}
+.metric-box{background:var(--surface2);border-radius:6px;padding:6px 8px;text-align:center}
+.metric-box .m-label{font-size:9px;text-transform:uppercase;letter-spacing:.5px;color:var(--muted)}
+.metric-box .m-value{font-size:13px;font-weight:700;color:var(--text);margin-top:1px}
+.confluence{margin-bottom:10px}
+.conf-row{display:flex;align-items:center;justify-content:space-between;padding:4px 0;border-bottom:1px solid #1e242c;font-size:12px}
+.conf-row:last-child{border-bottom:none}
+.conf-label{color:var(--muted)}
+.conf-value{font-weight:600;color:var(--text)}
+.conf-value.green{color:var(--green)}.conf-value.yellow{color:var(--yellow)}
+.conf-value.red{color:var(--red)}.conf-value.teal{color:var(--teal)}
+.delta-badge{display:inline-flex;align-items:center;gap:4px;font-size:11px;font-weight:700;padding:2px 7px;border-radius:4px;margin-left:6px}
+.delta-badge.green{background:var(--green-dim);color:var(--green)}
+.delta-badge.yellow{background:var(--yellow-dim);color:var(--yellow)}
+.delta-badge.grey{background:#1e242c;color:var(--muted)}
+.delta-dot{width:6px;height:6px;border-radius:50%}
+.delta-dot.green{background:var(--green)}.delta-dot.yellow{background:var(--yellow)}.delta-dot.grey{background:var(--muted)}
+.seat-banner{background:var(--teal-dim);border:1px solid var(--teal);border-radius:6px;padding:7px 10px;margin-bottom:10px;display:flex;align-items:center;justify-content:space-between;font-size:12px}
+.seat-label{color:var(--teal);font-weight:700}
+.seat-risk{color:var(--muted)}
+.card-actions{display:flex;gap:8px;padding-top:4px}
+.btn{flex:1;padding:9px 0;border-radius:6px;border:none;font-size:12px;font-weight:700;cursor:pointer;letter-spacing:.5px;transition:opacity .15s}
+.btn:hover{opacity:.85}
+.btn-click{background:var(--green);color:#0d1117}
+.btn-wait{background:var(--yellow-dim);color:var(--yellow);border:1px solid var(--yellow)}
+.btn-reject{background:var(--red-dim);color:var(--red);border:1px solid var(--red)}
+.btn-disabled{background:var(--surface2);color:var(--muted);cursor:not-allowed}
+.account-grid{display:grid;gap:14px;grid-template-columns:repeat(auto-fill,minmax(260px,1fr))}
+.account-card{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:16px}
+.account-card.dragon{border-top:3px solid var(--orange)}
+.account-card.normal{border-top:3px solid var(--teal)}
+.account-card.conservative{border-top:3px solid var(--blue)}
+.account-card.super-conservative{border-top:3px solid var(--muted)}
+.acct-name{font-size:14px;font-weight:700;margin-bottom:4px}
+.acct-mode{font-size:10px;text-transform:uppercase;letter-spacing:1px;margin-bottom:12px;font-weight:600}
+.acct-mode.dragon{color:var(--orange)}.acct-mode.normal{color:var(--teal)}
+.acct-mode.conservative{color:var(--blue)}.acct-mode.super-conservative{color:var(--muted)}
+.acct-rows{display:flex;flex-direction:column;gap:6px}
+.acct-row{display:flex;justify-content:space-between;font-size:12px}
+.acct-row .ar-label{color:var(--muted)}.acct-row .ar-val{font-weight:600;color:var(--text)}
+.acct-row .ar-val.green{color:var(--green)}.acct-row .ar-val.red{color:var(--red)}
+.acct-row .ar-val.yellow{color:var(--yellow)}.acct-row .ar-val.orange{color:var(--orange)}
+.gap-bar{margin-top:10px;background:var(--surface2);border-radius:4px;height:6px;overflow:hidden}
+.gap-fill{height:100%;border-radius:4px;background:var(--teal);transition:width .5s}
+.empty-state{text-align:center;padding:60px 20px;color:var(--muted)}
+.empty-state .e-icon{font-size:40px;margin-bottom:12px}
+.empty-state .e-title{font-size:16px;font-weight:600;color:var(--text);margin-bottom:6px}
+.empty-state .e-sub{font-size:13px}
+.kraken-grid{display:grid;gap:14px;grid-template-columns:repeat(auto-fill,minmax(300px,1fr))}
+.kraken-card{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:16px}
+.kraken-card-title{font-size:13px;font-weight:700;color:var(--teal);margin-bottom:12px;display:flex;align-items:center;gap:8px}
+.kc-rows{display:flex;flex-direction:column;gap:7px}
+.kc-row{display:flex;justify-content:space-between;font-size:12px}
+.kc-label{color:var(--muted)}.kc-val{font-weight:600;color:var(--text)}
+.kc-val.green{color:var(--green)}.kc-val.yellow{color:var(--yellow)}.kc-val.red{color:var(--red)}
+.badge{display:inline-block;padding:1px 7px;border-radius:4px;font-size:10px;font-weight:700}
+.badge.green{background:var(--green-dim);color:var(--green)}
+.badge.yellow{background:var(--yellow-dim);color:var(--yellow)}
+.badge.red{background:var(--red-dim);color:var(--red)}
+.badge.blue{background:#0d2040;color:var(--blue)}
+.no-signal-banner{background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:14px 16px
+;color:var(--muted);font-size:12px;margin-bottom:16px}
+</style>
+</head>
+<body>
+<div class="app">
+
+  <!-- SIDEBAR -->
+  <div class="sidebar">
+    <div class="sidebar-logo">JHL <span>Command Cockpit v2</span></div>
+    <div class="nav-section">Navigation</div>
+    <div class="nav-item active" onclick="showTab('trade')">⚡ Trade</div>
+    <div class="nav-item" onclick="showTab('props')">🏦 Props</div>
+    <div class="nav-item" onclick="showTab('kraken')">🐙 Kraken</div>
+    <div class="nav-section">Session</div>
+    <div class="nav-item" id="nav-signals">📡 Signals: <span id="sb-signal-count">—</span></div>
+    <div class="nav-item" id="nav-fg">😱 FG: <span id="sb-fg">—</span></div>
+    <div class="nav-item" id="nav-sprint">🚀 Sprint: <span id="sb-sprint">—</span></div>
+    <div class="sidebar-footer">
+      Last scan: <span id="sb-last-scan">—</span><br>
+      Next scan: <span id="sb-next-scan">—</span>
+    </div>
+  </div>
+
+  <!-- MAIN -->
+  <div class="main">
+
+    <!-- TOPBAR TABS -->
+    <div class="topbar">
+      <div class="tab active" id="tab-trade" onclick="showTab('trade')">TRADE</div>
+      <div class="tab" id="tab-props" onclick="showTab('props')">PROPS</div>
+      <div class="tab" id="tab-kraken" onclick="showTab('kraken')">KRAKEN</div>
+      <div class="topbar-right">
+        <div class="pulse" id="live-pulse"></div>
+        <span id="live-clock">—</span>
+        <span id="live-status">LIVE</span>
+      </div>
+    </div>
+
+    <!-- CONTENT -->
+    <div class="content">
+
+      <!-- ══ TRADE TAB ══════════════════════════════════════════════════ -->
+      <div class="tab-panel active" id="panel-trade">
+        <div class="stat-row" id="trade-stats"></div>
+        <div class="section-header">Live Signals</div>
+        <div class="cards-grid" id="signal-cards"></div>
+        <div id="signal-empty" style="display:none">
+          <div class="empty-state">
+            <div class="e-icon">📡</div>
+            <div class="e-title">Silence is the message</div>
+            <div class="e-sub">No S/A grade signals at this time. Scanner runs every 20 min.</div>
+          </div>
+        </div>
+        <div style="margin-top:24px">
+          <div class="section-header">Open Positions</div>
+          <div class="cards-grid" id="position-cards"></div>
+          <div id="position-empty" style="display:none">
+            <div class="empty-state" style="padding:30px 20px">
+              <div class="e-sub">No open positions.</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ══ PROPS TAB ══════════════════════════════════════════════════ -->
+      <div class="tab-panel" id="panel-props">
+        <div class="stat-row" id="props-stats"></div>
+        <div class="section-header">Account Lanes</div>
+        <div class="account-grid" id="account-cards"></div>
+      </div>
+
+      <!-- ══ KRAKEN TAB ═════════════════════════════════════════════════ -->
+      <div class="tab-panel" id="panel-kraken">
+        <div class="stat-row" id="kraken-stats"></div>
+        <div class="section-header">Execution Engine</div>
+        <div class="kraken-grid" id="kraken-cards"></div>
+      </div>
+
+    </div><!-- /content -->
+  </div><!-- /main -->
+</div><!-- /app -->
+
+<script>
+// =============================================================================
+// CONFIG
+// =============================================================================
+const BUS_URL      = '/api/signals';
+const POLL_MS      = 20000;   // refresh every 20s
+const CANDLE_MIN   = 240;     // 4H candle = 240 minutes
+const DELTA_GREEN  = 70;
+const DELTA_YELLOW = 60;
+
+// =============================================================================
+// STATE
+// =============================================================================
+let bus        = null;
+let timers     = {};   // signal timers keyed by pair+tier
+let clockTimer = null;
+
+// =============================================================================
+// TAB SWITCHING
+// =============================================================================
+function showTab(name) {
+  ['trade','props','kraken'].forEach(t => {
+    document.getElementById('panel-' + t).classList.toggle('active', t === name);
+    document.getElementById('tab-'   + t).classList.toggle('active', t === name);
+    const nav = document.querySelector(`.nav-item[onclick="showTab('${t}')"]`);
+    if (nav) nav.classList.toggle('active', t === name);
+  });
+}
+
+// =============================================================================
+// CLOCK
+// =============================================================================
+function startClock() {
+  function tick() {
+    const now = new Date();
+    const cdt = new Date(now.getTime() - 5*3600000);
+    document.getElementById('live-clock').textContent =
+      cdt.toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit',second:'2-digit',hour12:true}) + ' CDT';
+  }
+  tick();
+  clockTimer = setInterval(tick, 1000);
+}
+
+// =============================================================================
+// MINUTES LEFT (live countdown using stored window_end or minutes_left snapshot)
+// =============================================================================
+function getMinutesLeft(sig) {
+  if (sig._window_end_ms) {
+    return Math.max(0, Math.floor((sig._window_end_ms - Date.now()) / 60000));
+  }
+  return sig.minutes_left || 0;
+}
+
+// stamp a window_end_ms when we first load a signal so the timer counts down live
+function stampWindowEnd(sig) {
+  const key = sig.pair + sig.tier;
+  if (!timers[key]) {
+    const ml = sig.minutes_left || 0;
+    timers[key] = { window_end_ms: Date.now() + ml * 60000 };
+  }
+  sig._window_end_ms = timers[key].window_end_ms;
+}
+
+// =============================================================================
+// VERDICT LOGIC
+// =============================================================================
+function getVerdict(sig) {
+  const ml  = getMinutesLeft(sig);
+  const dec = (sig.december_verdict || '').toUpperCase();
+  if (ml <= 0) return 'fail';
+  if (dec === 'CONFIRM' && sig.remi_status === 'CLEAN') return 'match';
+  if (dec === 'WAIT_C1_GREEN') return 'wait';
+  return 'wait';
+}
+
+// =============================================================================
+// DELTA BADGE
+// =============================================================================
+function deltaBadge(pct) {
+  if (pct === null || pct === undefined) {
+    return `<span class="delta-badge grey"><span class="delta-dot grey"></span>Δ —</span>`;
+  }
+  const cls = pct >= DELTA_GREEN ? 'green' : pct >= DELTA_YELLOW ? 'yellow' : 'grey';
+  return `<span class="delta-badge ${cls}"><span class="delta-dot ${cls}"></span>Δ ${pct}%</span>`;
+}
+
+// =============================================================================
+// READINESS ROW
+// =============================================================================
+function readinessRow(sig, verdict) {
+  const ml  = getMinutesLeft(sig);
+  if (verdict === 'fail') {
+    return `<div class="readiness">
+      <div class="readiness-dot red"></div>
+      <span class="readiness-time" style="color:var(--red)">EXPIRED</span>
+      <span class="readiness-label">window closed</span>
+    </div>`;
+  }
+  if (verdict === 'wait') {
+    const dec = (sig.december_verdict || '').toUpperCase();
+    const label = dec === 'WAIT_C1_GREEN' ? 'wait for C1 green' : 'not ready';
+    return `<div class="readiness">
+      <div class="readiness-dot yellow"></div>
+      <span class="readiness-time" style="color:var(--yellow)">${ml} min left</span>
+      <span class="readiness-label">${label}</span>
+    </div>`;
+  }
+  const dotCls = ml > 30 ? 'green' : ml > 10 ? 'yellow' : 'red';
+  const timeCls = ml > 30 ? 'var(--green)' : ml > 10 ? 'var(--yellow)' : 'var(--red)';
+  return `<div class="readiness">
+    <div class="readiness-dot ${dotCls}"></div>
+    <span class="readiness-time" style="color:${timeCls}">${ml} min left</span>
+    <span class="readiness-label">window open · ${sig.expiry_str || ''}</span>
+  </div>`;
+}
+
+// =============================================================================
+// SIGNAL CARD
+// =============================================================================
+function buildSignalCard(sig) {
+  stampWindowEnd(sig);
+  const verdict  = getVerdict(sig);
+  const ml       = getMinutesLeft(sig);
+  const bias     = (sig.bias || '').toUpperCase();
+  const tier     = sig.tier || 'TIER_A';
+  const seats    = tier === 'TIER_A' ? '$25K / $10K' : '$10K / $5K';
+  const riskText = tier === 'TIER_A' ? 'Risk $350 · Dragon lane' : 'Risk $150 · Backup lane';
+  const grade    = (sig.grade || 'S').toUpperCase();
+  const conv     = sig.conviction ? Math.round(sig.conviction * 100) : 0;
+  const strq     = sig.structure_quality ? Math.round(sig.structure_quality * 100) : 0;
+  const deltaPct = sig.delta_pct || null;
+
+  // direction confluence color
+  const dirColor = sig.ai_st_direction === 'WITH_TREND' ? 'green' : 'red';
+
+  // verdict pill text
+  const pillText = verdict === 'match'
+    ? `✓ MATCH — SEAT ${seats}`
+    : verdict === 'wait'
+    ? `⏳ WAIT — SEAT ${seats}`
+    : `✗ FAIL — EXPIRED`;
+
+  // buttons
+  let btns = '';
+  if (verdict === 'match') {
+    btns = `<button class="btn btn-click">CLICK — SEND TO ${seats}</button>
+            <button class="btn btn-reject" style="flex:0.4" onclick="rejectSignal(this,'${sig.pair}','${tier}')">SKIP</button>`;
+  } else if (verdict === 'wait') {
+    btns = `<button class="btn btn-wait">WAIT FOR C1 GREEN</button>
+            <button class="btn btn-reject" style="flex:0.4" onclick="rejectSignal(this,'${sig.pair}','${tier}')">SKIP</button>`;
+  } else {
+    btns = `<button class="btn btn-disabled" disabled>WINDOW EXPIRED</button>`;
+  }
+
+  return `
+  <div class="signal-card ${verdict}" id="sc-${sig.pair}-${tier}">
+    <div class="card-header">
+      <div class="card-pair">${sig.pair}</div>
+      <div class="card-meta">
+        <span class="card-grade ${grade === 'S' ? 's' : ''}">${grade}</span>
+        <span class="card-bias ${bias === 'LONG' ? 'long' : 'short'}">${bias}</span>
+      </div>
+    </div>
+    <div class="card-body">
+      <div class="verdict-pill ${verdict}">${pillText}</div>
+      ${readinessRow(sig, verdict)}
+      <div class="metrics-row">
+        <div class="metric-box"><div class="m-label">Entry</div><div class="m-value">${sig.entry}</div></div>
+        <div class="metric-box"><div class="m-label">Stop</div><div class="m-value">${sig.sl}</div></div>
+        <div class="metric-box"><div class="m-label">Target</div><div class="m-value">${sig.tp}</div></div>
+        <div class="metric-box"><div class="m-label">Risk $</div><div class="m-value">$${sig.risk_dollars}</div></div>
+        <div class="metric-box"><div class="m-label">Units</div><div class="m-value">${(sig.units||0).toLocaleString()}</div></div>
+        <div class="metric-box"><div class="m-label">Exp Profit</div><div class="m-value">$${sig.expected_profit}</div></div>
+      </div>
+      <div class="confluence">
+        <div class="conf-row">
+          <span class="conf-label">Direction</span>
+          <span class="conf-value ${dirColor}">${bias} · ${sig.ai_st_direction || '—'}${deltaBadge(deltaPct)}</span>
+        </div>
+        <div class="conf-row">
+          <span class="conf-label">Conviction</span>
+          <span class="conf-value ${conv >= 88 ? 'green' : conv >= 75 ? 'yellow' : 'red'}">${conv}%</span>
+        </div>
+        <div class="conf-row">
+          <span class="conf-label">Structure</span>
+          <span class="conf-value ${strq >= 85 ? 'green' : strq >= 70 ? 'yellow' : 'red'}">${strq}%</span>
+        </div>
+        <div class="conf-row">
+          <span class="conf-label">Regime</span>
+          <span class="conf-value teal">${sig.regime || '—'}</span>
+        </div>
+        <div class="conf-row">
+          <span class="conf-label">REMI</span>
+          <span class="conf-value ${sig.remi_status === 'CLEAN' ? 'green' : 'red'}">${sig.remi_status || '—'}</span>
+        </div>
+        <div class="conf-row">
+          <span class="conf-label">December</span>
+          <span class="conf-value ${sig.december_verdict === 'CONFIRM' ? 'green' : 'yellow'}">${sig.december_verdict || '—'}</span>
+        </div>
+        <div class="conf-row">
+          <span class="conf-label">RR</span>
+          <span class="conf-value">${sig.rr || '—'}R</span>
+        </div>
+      </div>
+            <div class="seat-banner">
+        <span class="seat-label">SEAT ${seats}</span>
+        <span class="seat-risk">${riskText}</span>
+      </div>
+      <div class="card-actions">${btns}</div>
+    </div>
+  </div>`;
+}
+
+// =============================================================================
+// POSITION CARD
+// =============================================================================
+function buildPositionCard(pos) {
+  const h     = pos.health || {};
+  const color = (h.color || 'GREEN').toUpperCase();
+  const score = h.score || 0;
+  const colorCls = color === 'GREEN' ? 'green' : color === 'YELLOW' ? 'yellow' : 'red';
+  const sub   = h.subscores || {};
+  return `
+  <div class="signal-card match">
+    <div class="card-header">
+      <div class="card-pair">${pos.pair} <span style="font-size:11px;color:var(--muted)">OPEN</span></div>
+      <div class="card-meta">
+        <span class="badge ${colorCls}">${color}</span>
+        <span class="badge blue">${pos.bias || 'LONG'}</span>
+      </div>
+    </div>
+    <div class="card-body">
+      <div class="verdict-pill match">Health ${score} · ${color}</div>
+      <div class="confluence">
+        <div class="conf-row"><span class="conf-label">Recommendation</span>
+          <span class="conf-value green">${h.recommendation || '—'}</span></div>
+        <div class="conf-row"><span class="conf-label">Price vs Entry</span>
+          <span class="conf-value">${sub.price_vs_entry || '—'}</span></div>
+        <div class="conf-row"><span class="conf-label">Candle Quality</span>
+          <span class="conf-value">${sub.candle_quality || '—'}</span></div>
+        <div class="conf-row"><span class="conf-label">Volume Trend</span>
+          <span class="conf-value">${sub.volume_trend || '—'}</span></div>
+        <div class="conf-row"><span class="conf-label">AI Aligned</span>
+          <span class="conf-value">${sub.ai_st_aligned || '—'}</span></div>
+        <div class="conf-row"><span class="conf-label">3-Candle Rule</span>
+          <span class="conf-value">${sub.time_vs_3_candle_rule || '—'}</span></div>
+      </div>
+    </div>
+  </div>`;
+}
+
+// =============================================================================
+// ACCOUNT CARD
+// =============================================================================
+function buildAccountCard(acct) {
+  const mode    = (acct.mode || '').toLowerCase().replace(/_/g,'-');
+  const tier    = acct.tier || 'TIER_B';
+  const gap     = acct.gap_to_target || 0;
+  const base    = acct.baseline || 1;
+  const pct     = Math.min(100, Math.round((acct.current_equity / (acct.current_equity - gap)) * 100));
+  const gapCls  = gap >= 0 ? 'green' : 'red';
+  const sprintBadge = acct.sprint_mode
+    ? `<span class="badge green">SPRINT</span>`
+    : `<span class="badge blue">NORMAL</span>`;
+  const tierBadge = tier === 'TIER_A'
+    ? `<span class="badge green">TIER A</span>`
+    : `<span class="badge blue">TIER B</span>`;
+  const modeCls = mode.includes('dragon') || mode.includes('full') ? 'dragon'
+    : mode.includes('normal') ? 'normal'
+    : mode.includes('super') ? 'super-conservative'
+    : 'conservative';
+
+  return `
+  <div class="account-card ${modeCls}">
+    <div class="acct-name">${acct.name}</div>
+    <div class="acct-mode ${modeCls}">${acct.mode || '—'}</div>
+    <div style="display:flex;gap:6px;margin-bottom:10px">${tierBadge}${sprintBadge}</div>
+    <div class="acct-rows">
+      <div class="acct-row">
+        <span class="ar-label">Current Equity</span>
+        <span class="ar-val">$${(acct.current_equity||0).toLocaleString()}</span>
+      </div>
+      <div class="acct-row">
+        <span class="ar-label">Baseline</span>
+        <span class="ar-val">$${(acct.baseline||0).toLocaleString()}</span>
+      </div>
+      <div class="acct-row">
+        <span class="ar-label">Gap to Target</span>
+        <span class="ar-val ${gapCls}">$${Math.abs(gap).toLocaleString()}</span>
+      </div>
+      <div class="acct-row">
+        <span class="ar-label">Risk / Trade</span>
+        <span class="ar-val orange">$${acct.recommended_risk_per_trade||0}</span>
+      </div>
+    </div>
+    <div class="gap-bar">
+      <div class="gap-fill" style="width:${pct}%"></div>
+    </div>
+  </div>`;
+}
+
+// =============================================================================
+// KRAKEN CARDS
+// =============================================================================
+function buildKrakenCards(b) {
+  const sigs    = b.signals || [];
+  const sammys  = sigs.filter(s => s.grade === 'S');
+  const sprint  = b.sprint_mode ? 'ON' : 'OFF';
+  const quiet   = b.quiet_hours ? 'YES' : 'NO';
+  const fg      = b.fg || {};
+
+  return `
+  <div class="kraken-card">
+    <div class="kraken-card-title">🐙 Execution Engine</div>
+    <div class="kc-rows">
+      <div class="kc-row"><span class="kc-label">Bot Mode</span>
+        <span class="kc-val green">LIVE</span></div>
+      <div class="kc-row"><span class="kc-label">Sprint Mode</span>
+        <span class="kc-val ${b.sprint_mode ? 'green' : 'yellow'}">${sprint}</span></div>
+      <div class="kc-row"><span class="kc-label">Quiet Hours</span>
+        <span class="kc-val ${b.quiet_hours ? 'red' : 'green'}">${quiet}</span></div>
+      <div class="kc-row"><span class="kc-label">Fear & Greed</span>
+        <span class="kc-val ${fg.score < 30 ? 'red' : fg.score > 70 ? 'green' : 'yellow'}">${fg.score || '—'} · ${fg.label || '—'}</span></div>
+      <div class="kc-row"><span class="kc-label">Active Pairs</span>
+        <span class="kc-val teal">${b.active_pairs || 0}</span></div>
+      <div class="kc-row"><span class="kc-label">S-Grade Signals</span>
+        <span class="kc-val green">${sammys.length}</span></div>
+    </div>
+  </div>
+  <div class="kraken-card">
+    <div class="kraken-card-title">📊 Session Stats</div>
+    <div class="kc-rows">
+      <div class="kc-row"><span class="kc-label">Signals Fired</span>
+        <span class="kc-val">${b.session_stats?.signals_fired || 0}</span></div>
+      <div class="kc-row"><span class="kc-label">Signals Killed</span>
+        <span class="kc-val red">${b.session_stats?.signals_killed || 0}</span></div>
+      <div class="kc-row"><span class="kc-label">S-Grade Count</span>
+        <span class="kc-val green">${b.session_stats?.s_grade_count || 0}</span></div>
+      <div class="kc-row"><span class="kc-label">Scan Duration</span>
+        <span class="kc-val">${b.session_stats?.scan_duration_sec || 0}s</span></div>
+    </div>
+  </div>
+  <div class="kraken-card">
+    <div class="kraken-card-title">🗺 Regime Map</div>
+    <div class="kc-rows">
+      ${Object.entries(b.regime_map || {}).map(([pair,regime]) => `
+      <div class="kc-row">
+        <span class="kc-label">${pair}</span>
+        <span class="kc-val ${regime === 'TREND_UP' ? 'green' : 'red'}">${regime}</span>
+      </div>`).join('') || '<div class="kc-row"><span class="kc-label" style="color:var(--muted)">No regime data</span></div>'}
+    </div>
+  </div>
+  <div class="kraken-card">
+    <div class="kraken-card-title">⚙ Execution Rules</div>
+    <div class="kc-rows">
+      <div class="kc-row"><span class="kc-label">S-Grade</span>
+        <span class="kc-val green">AUTO CONFIRM · all 3 alerts</span></div>
+      <div class="kc-row"><span class="kc-label">A-Grade</span>
+        <span class="kc-val yellow">LOG ONLY · manual confirm</span></div>
+      <div class="kc-row"><span class="kc-label">REMI Gate</span>
+        <span class="kc-val">CLEAN required</span></div>
+      <div class="kc-row"><span class="kc-label">Price Sanity</span>
+        <span class="kc-val">±15% max deviation</span></div>
+      <div class="kc-row"><span class="kc-label">3-Candle Rule</span>
+        <span class="kc-val">C1 neg → cut. C2 flat → cut.</span></div>
+      <div class="kc-row"><span class="kc-label">Poll Interval</span>
+        <span class="kc-val teal">Every 20 min · 6PM–2AM CDT</span></div>
+    </div>
+  </div>`;
+}
+
+// =============================================================================
+// REJECT SIGNAL
+// =============================================================================
+function rejectSignal(btn, pair, tier) {
+  const card = document.getElementById(`sc-${pair}-${tier}`);
+  if (card) {
+    card.style.opacity = '0.3';
+    card.style.pointerEvents = 'none';
+  }
+  console.log(`REJECTED: ${pair} ${tier}`);
+}
+
+// =============================================================================
+// RENDER
+// =============================================================================
+function render(b) {
+  const sigs  = b.signals || [];
+  const pos   = b.open_positions || [];
+  const accts = b.accounts || [];
+  const fg    = b.fg || {};
+  const ss    = b.session_stats || {};
+
+  // sidebar
+  document.getElementById('sb-signal-count').textContent = sigs.length;
+  document.getElementById('sb-fg').textContent = `${fg.score || '—'} ${fg.label || ''}`;
+  document.getElementById('sb-sprint').textContent = b.sprint_mode ? 'ON' : 'OFF';
+
+  function fmtTime(iso) {
+    if (!iso) return '—';
+    const d = new Date(iso);
+    const cdt = new Date(d.getTime() - 5*3600000);
+    return cdt.toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit',hour12:true}) + ' CDT';
+  }
+  document.getElementById('sb-last-scan').textContent = fmtTime(b.last_scan);
+  document.getElementById('sb-next-scan').textContent = fmtTime(b.next_scan);
+
+  // ── TRADE TAB ────────────────────────────────────────────────────────────
+  const sammys = sigs.filter(s => s.grade === 'S' || s.grade === 'A');
+  document.getElementById('trade-stats').innerHTML = `
+    <div class="stat-card"><div class="stat-label">Live Signals</div>
+      <div class="stat-value teal">${sigs.length}</div></div>
+    <div class="stat-card"><div class="stat-label">S-Grade</div>
+      <div class="stat-value green">${sigs.filter(s=>s.grade==='S').length}</div></div>
+    <div class="stat-card"><div class="stat-label">Open Positions</div>
+      <div class="stat-value">${pos.length}</div></div>
+    <div class="stat-card"><div class="stat-label">Fear & Greed</div>
+      <div class="stat-value ${fg.score<30?'red':fg.score>70?'green':'yellow'}">${fg.score||'—'}</div></div>
+    <div class="stat-card"><div class="stat-label">Sprint</div>
+      <div class="stat-value ${b.sprint_mode?'green':'muted'}">${b.sprint_mode?'ON':'OFF'}</div></div>`;
+
+  const scEl = document.getElementById('signal-cards');
+  const seEl = document.getElementById('signal-empty');
+  if (sammys.length > 0) {
+    scEl.innerHTML = sammys.map(buildSignalCard).join('');
+    seEl.style.display = 'none';
+  } else {
+    scEl.innerHTML = '';
+    seEl.style.display = 'block';
+  }
+
+  const pcEl = document.getElementById('position-cards');
+  const peEl = document.getElementById('position-empty');
+  if (pos.length > 0) {
+    pcEl.innerHTML = pos.map(buildPositionCard).join('');
+    peEl.style.display = 'none';
+  } else {
+    pcEl.innerHTML = '';
+    peEl.style.display = 'block';
+  }
+
+  // ── PROPS TAB ────────────────────────────────────────────────────────────
+  const totalGap = accts.reduce((s,a) => s + Math.abs(a.gap_to_target||0), 0);
+  const totalEq  = accts.reduce((s,a) => s + (a.current_equity||0), 0);
+  document.getElementById('props-stats').innerHTML = `
+    <div class="stat-card"><div class="stat-label">Total Equity</div>
+      <div class="stat-value teal">$${totalEq.toLocaleString()}</div></div>
+    <div class="stat-card"><div class="stat-label">Total Gap</div>
+      <div class="stat-value red">$${totalGap.toLocaleString()}</div></div>
+    <div class="stat-card"><div class="stat-label">Accounts</div>
+      <div class="stat-value">${ac

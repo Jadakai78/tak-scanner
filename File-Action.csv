@@ -1,0 +1,5 @@
+"File","Action"
+"pair_universe.py","REPLACE"
+"tak_scanner_v3.py","REPLACE"
+"scheduler.py","REPLACE"
+"kraken_prop_pairs.csv","NEW — drop in jhl_v2\ folder"

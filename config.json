@@ -1,0 +1,43 @@
+{
+  "dry_run": true,
+  "prop_seat": "10K",
+  "kraken_api_key": "YOUR_API_KEY",
+  "kraken_api_secret": "YOUR_API_SECRET",
+  "poll_interval_sec": 60,
+  "auto_confirm_grade": "S",
+  "manual_confirm_grade": "A",
+  "min_conviction": 0.75,
+  "exit_after_candles": 3,
+  "candle_interval_min": 240,
+  "notes": "dry_run=true simulates all orders. Set to false ONLY with real keys + a funded seat. Seats: 5K, 10K, 25K_DRAGON.",
+  "sprint_mode": false,
+  "seat": "10K",
+  "api_key": "YOUR_API_KEY",
+  "api_secret": "YOUR_API_SECRET",
+  "telegram_token": "8860741830:AAGiccCbk4dzoTq97gWIIykZVunDvkkl6ys",
+  "telegram_chat_id": "7733126931",
+  "session_baselines": {
+    "eval_1_5k": 4817.38,
+    "starter_2_10k": 9729.92,
+    "starter_3_10k": 9725.64,
+    "eval_4_25k": 24193.10
+  },
+  "tier_a_accounts": ["eval_4_25k", "starter_3_10k"],
+  "tier_b_accounts": ["starter_2_10k", "eval_1_5k"],
+  "aggression_scale_back_threshold": 0.75,
+  "ladder_tp_enabled": true,
+  "caution_rules": {
+    "sprint_mode": {
+      "c1_red_action": "CUT_IMMEDIATELY",
+      "c1_flat_action": "ONE_MORE_CANDLE",
+      "c2_flat_action": "CUT_IMMEDIATELY",
+      "breakeven_lock_on": "C2_OPEN_GREEN"
+    },
+    "normal_mode": {
+      "c1_red_action": "CUT_IMMEDIATELY",
+      "c1_flat_action": "HOLD",
+      "c2_flat_action": "CUT",
+      "max_candles": 3
+    }
+  }
+}

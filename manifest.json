@@ -1,0 +1,24 @@
+{
+  "name": "JHL Feed",
+  "short_name": "JHL Feed",
+  "description": "Parked review PWA for the JHL live trading feed.",
+  "start_url": "./index-2.html",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#111615",
+  "theme_color": "#0f1415",
+  "icons": [
+    {
+      "src": "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 192 192'%3E%3Crect width='192' height='192' rx='40' fill='%2301696f'/%3E%3Cpath d='M46 42v70c0 19 14 34 32 34s32-15 32-34V42M118 40v108M118 148h30' fill='none' stroke='white' stroke-width='14' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E",
+      "sizes": "192x192",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='108' fill='%2301696f'/%3E%3Cpath d='M122 112v184c0 51 37 92 84 92s84-41 84-92V112M315 106v288M315 394h80' fill='none' stroke='white' stroke-width='34' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E",
+      "sizes": "512x512",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

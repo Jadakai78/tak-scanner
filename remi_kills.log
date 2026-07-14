@@ -1,0 +1,6 @@
+{"timestamp": "2026-07-14T16:14:01.636320+00:00", "pair": "ETH", "engine": "S1", "bias": "LONG", "kill_reason": "HTF_CONFLICT", "signal_score": 0.73}
+{"timestamp": "2026-07-14T16:14:07.958590+00:00", "pair": "XDG", "engine": "S1", "bias": "LONG", "kill_reason": "HTF_CONFLICT", "signal_score": 0.69}
+{"timestamp": "2026-07-14T16:14:12.143758+00:00", "pair": "ALGO", "engine": "S1", "bias": "LONG", "kill_reason": "HTF_CONFLICT", "signal_score": 0.71}
+{"timestamp": "2026-07-14T16:14:32.388904+00:00", "pair": "XBT", "engine": "S1", "bias": "LONG", "kill_reason": "HTF_CONFLICT", "signal_score": 0.828}
+{"timestamp": "2026-07-14T16:14:35.528519+00:00", "pair": "BNB", "engine": "S1", "bias": "LONG", "kill_reason": "HTF_CONFLICT", "signal_score": 0.852}
+{"timestamp": "2026-07-14T16:14:40.854304+00:00", "pair": "WBTC", "engine": "S1", "bias": "LONG", "kill_reason": "HTF_CONFLICT", "signal_score": 0.852}
