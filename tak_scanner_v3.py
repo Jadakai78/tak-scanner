@@ -11,7 +11,7 @@ import pandas as pd
 import requests
 
 from aisupertrend import AISupertrend
-from convictionscorer import ConvictionScorer, scorev2shadow
+from convictionscorer import ConvictionScorer, score_v2_shadow
 from microstructure import enrich as microenrich
 from pairuniverse import PairUniverse, PROPWHITELIST
 from regimeclassifier import RegimeClassifier
@@ -432,7 +432,7 @@ class TakScannerV3:
                         raw["offencescore"] = min(1.0, max(0.0, float(raw.get("offencescore", 0.0)) + float(delta_ctx.get("delta_modifier", 0.0))))
 
                 graded = self.scorer.score(raw)
-                v2 = scorev2shadow(raw)
+                v2 = score_v2_shadow(raw)
                 if graded.get("grade") == "F":
                     continue
 
