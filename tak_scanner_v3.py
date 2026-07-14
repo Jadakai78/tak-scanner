@@ -13,7 +13,7 @@ import requests
 from aisupertrend import AISupertrend
 from convictionscorer import ConvictionScorer, score_v2_shadow
 from microstructure import enrich as microenrich
-from pairuniverse import PairUniverse, PROPWHITELIST
+from pairuniverse import PairUniverse, PROP_WHITELIST
 from regimeclassifier import RegimeClassifier
 from remi import Remi
 from signalbus import SignalBus
@@ -457,7 +457,7 @@ class TakScannerV3:
                             "gimba_message": enriched.get("gimba_message"),
                         }
                     )
-                elif pair in PROPWHITELIST:
+                elif pair in PROP_WHITELIST:
                     signals.append(enriched)
 
         signals.sort(
