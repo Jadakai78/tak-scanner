@@ -404,6 +404,7 @@ class TakScannerV3:
 
             regime = self.regime.classify(pair, df, fg_score)
             regime_map[pair] = regime
+            logger.info("REGIME | pair=%s regime=%s", pair, regime)
             if regime == "DEAD":
                 dead_count += 1
                 continue
