@@ -540,6 +540,7 @@ class TakScannerV3:
             json.dumps(payload_dict, ensure_ascii=False, indent=2),
             encoding="utf-8",
         )
+        logger.info("BUS WRITE OK | signals=%s killed=%s", len(signals), len(killed))
 
         try:
             worker_url = "https://jhl-signal-bus.blazing0478.workers.dev/update"
