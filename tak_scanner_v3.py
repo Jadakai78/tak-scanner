@@ -376,16 +376,16 @@ class TakScannerV3:
         start = time.time()
         now = datetime.now(timezone.utc)
         quiet = is_quiet_hours()
-        sprintmode = load_sprint_mode()
+        sprint_mode = load_sprint_mode()
         fg = self.fetch_fg()
-        fgscore = fg["score"]
+        fg_score = fg["score"]
 
         logger.info(
             "Scan start | F&G=%s (%s) | quiet_hours=%s | sprint_mode=%s",
-            fgscore,
+            fg_score,
             fg["label"],
             quiet,
-            sprintmode,
+            sprint_mode,
         )
 
         active = self.universe.get_active_pairs(interval=240, limit=self.maxpairs)
@@ -402,7 +402,7 @@ class TakScannerV3:
             if df is None or len(df) < 60:
                 continue
 
-            regime = self.regime.classify(pair, df, fgscore)
+            regime = self.regime.classify(pair, df, fg_score)
             regime_map[pair] = regime
             if regime == "DEAD":
                 dead_count += 1
@@ -412,7 +412,7 @@ class TakScannerV3:
             daily_df: Optional[pd.DataFrame] = None
 
             for engine_id in REGIME_ENGINES.get(regime, []):
-                raw = self.run_engine(engine_id, pair, df, regime, fgscore, aist)
+                raw = self.run_engine(engine_id, pair, df, regime, fg_score, aist)
                 if raw is None or not raw.get("bias"):
                     continue
 
@@ -430,7 +430,13 @@ class TakScannerV3:
                     delta_ctx = score_delta_context(df, raw.get("bias", "LONG"))
                     raw.update(delta_ctx)
                     if "offencescore" in raw:
-                        raw["offencescore"] = min(1.0, max(0.0, float(raw.get("offencescore", 0.0)) + float(delta_ctx.get("delta_modifier", 0.0))))
+                        raw["offencescore"] = min(
+                            1.0,
+                            max(
+                                0.0,
+                                float(raw.get("offencescore", 0.0)) + float(delta_ctx.get("delta_modifier", 0.0)),
+                            ),
+                        )
 
                 graded = self.scorer.score(raw)
                 v2 = score_v2_shadow(raw)
@@ -439,11 +445,20 @@ class TakScannerV3:
 
                 if daily_df is None:
                     daily_df = self.universe.fetch_ohlc(item["pairkey"], interval=1440)
-                verdict = self.remi.evaluate(raw, conviction=graded["score"], dailydf=daily_df, fgscore=fgscore)
+
+                verdict = self.remi.evaluate(
+                    raw,
+                    conviction=graded["score"],
+                    dailydf=daily_df,
+                    fgscore=fg_score,
+                )
+
                 rts = self.resolve_rts(raw, graded, mtf)
                 tier = tier_for_pair(pair, active)
                 action_state = self.derive_action_state(rts["intent"], tier)
-                enriched = self.finalize_signal(raw, graded, mtf, aist, verdict, now, active, v2, rts, action_state)
+                enriched = self.finalize_signal(
+                    raw, graded, mtf, aist, verdict, now, active, v2, rts, action_state
+                )
 
                 if verdict.get("status") == "KILLED" or self.should_cut_now(enriched):
                     killed.append(
@@ -478,22 +493,26 @@ class TakScannerV3:
             "s_grade_count": len(sammy),
             "scan_duration_sec": round(time.time() - start, 2),
         }
+
         next_scan_dt = self._next_scan_time(now)
         logger.info("next_scan_dt=%r type=%s", next_scan_dt, type(next_scan_dt))
 
-        self.bus.update({
-            "last_scan": now.isoformat(),
-            "next_scan": next_scan_dt.isoformat(),
-            "f_g": fg,
-            "active_pairs": len(active),
-            "dead_pairs": dead_count,
-            "signals": signals,
-            "killed_signals": killed,
-            "regime_map": regime_map,
-            "session_stats": stats,
-            "quiet_hours": quiet,
-            "sprint_mode": sprint_mode,
-        })
+        self.bus.update(
+            {
+                "last_scan": now.isoformat(),
+                "next_scan": next_scan_dt.isoformat(),
+                "f_g": fg,
+                "active_pairs": len(active),
+                "dead_pairs": dead_count,
+                "signals": signals,
+                "killed_signals": killed,
+                "regime_map": regime_map,
+                "session_stats": stats,
+                "quiet_hours": quiet,
+                "sprint_mode": sprint_mode,
+            }
+        )
+
         try:
             worker_url = "https://jhl-signal-bus.blazing0478.workers.dev/update"
             bus_path = Path("/app/signal_bus.json")
@@ -510,10 +529,10 @@ class TakScannerV3:
             )
             resp.raise_for_status()
             logger.info("Worker push OK: %s", resp.status_code)
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             logger.warning("Worker push failed: %s", exc)
 
-        self._fire_alerts(sammy, quiet, sprint_mode)
+        self.fire_alerts(sammy, quiet, sprint_mode)
         logger.info(
             "Scan complete: %d fired, %d killed, %d S-grade in %.1fs",
             stats["signals_fired"],
@@ -522,7 +541,6 @@ class TakScannerV3:
             stats["scan_duration_sec"],
         )
         return stats
-
 
 if __name__ == "__main__":
     scanner = TakScannerV3(maxpairs=None)
