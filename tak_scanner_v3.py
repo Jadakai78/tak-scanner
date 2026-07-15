@@ -148,7 +148,7 @@ class TakScannerV3:
 
     @staticmethod
     def _next_scan_time(now: datetime) -> datetime:
-        logger.info("next_scan": next_scan_dt.isoformat(), next_scan_dt, type(next_scan_dt))
+        logger.info("next_scan": next_scan_dt.isoformat(), type(next_scan_dt))
         """Compute the next Tier-1 scan timestamp (UTC)."""
         candidates = []
         for h in SCAN_HOURS_UTC:
@@ -479,10 +479,12 @@ class TakScannerV3:
             "s_grade_count": len(sammy),
             "scan_duration_sec": round(time.time() - start, 2),
         }
+        next_scan_dt = self._next_scan_time(now)
+        logger.info("next_scan_dt=%r type=%s", next_scan_dt, type(next_scan_dt))
 
         self.bus.update({
             "last_scan": now.isoformat(),
-            "next_scan": self._next_scan_time(now).isoformat(),
+            "next_scan": next_scan_dt.isoformat(),
             "f_g": fg,
             "active_pairs": len(active),
             "dead_pairs": dead_count,
@@ -493,7 +495,6 @@ class TakScannerV3:
             "quiet_hours": quiet,
             "sprint_mode": sprint_mode,
         })
-
         try:
             worker_url = "https://jhl-signal-bus.blazing0478.workers.dev/update"
             bus_path = Path("/app/signal_bus.json")
