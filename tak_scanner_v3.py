@@ -147,10 +147,11 @@ class TakScannerV3:
             return {"score": 50, "label": "Neutral"}
 
     @staticmethod
-    def next_scan_time(now: datetime) -> datetime:
+    def _next_scan_time(now: datetime) -> datetime:
+        """Compute the next Tier-1 scan timestamp (UTC)."""
         candidates = []
-        for hour in SCAN_HOURS_UTC:
-            t = now.replace(hour=hour, minute=SCAN_MINUTE_UTC, second=0, microsecond=0)
+        for h in SCAN_HOURS_UTC:
+            t = now.replace(hour=h, minute=SCAN_MINUTE_UTC, second=0, microsecond=0)
             if t <= now:
                 t += timedelta(days=1)
             candidates.append(t)
