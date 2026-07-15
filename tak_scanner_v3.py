@@ -497,20 +497,23 @@ class TakScannerV3:
         next_scan_dt = self._next_scan_time(now)
         logger.info("next_scan_dt=%r type=%s", next_scan_dt, type(next_scan_dt))
 
-        self.bus.update(
-            {
-                "last_scan": now.isoformat(),
-                "next_scan": next_scan_dt.isoformat(),
-                "f_g": fg,
-                "active_pairs": len(active),
-                "dead_pairs": dead_count,
-                "signals": signals,
-                "killed_signals": killed,
-                "regime_map": regime_map,
-                "session_stats": stats,
-                "quiet_hours": quiet,
-                "sprint_mode": sprint_mode,
-            }
+        payload_dict = {
+            "last_scan": now.isoformat(),
+            "next_scan": next_scan_dt.isoformat(),
+            "f_g": fg,
+            "active_pairs": len(active),
+            "dead_pairs": dead_count,
+            "signals": signals,
+            "killed_signals": killed,
+            "regime_map": regime_map,
+            "session_stats": stats,
+            "quiet_hours": quiet,
+            "sprint_mode": sprint_mode,
+        }
+
+        Path("/app/signal_bus.json").write_text(
+            json.dumps(payload_dict, ensure_ascii=False, indent=2),
+            encoding="utf-8",
         )
 
         try:
