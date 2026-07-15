@@ -523,10 +523,11 @@ class TakScannerV3:
 
 
 if __name__ == "__main__":
-    scanner = TakScannerV3(maxpairs=None)
+    scanner = TakScannerV3(max_pairs=None)
     results = scanner.run_scan()
     print(
-        f"Scan complete: {results['signalsfired']} signals, "
-        f"{results['signalskilled']} killed, "
-        f"{results['sgradecount']} S-grade ({results['scandurationsec']}s)"
+        f"Scan complete: {results['signals_fired']} signals, "
+        f"{results['signals_killed']} killed, "
+        f"{results['s_grade_count']} S-grade "
+        f"({results['scan_duration_sec']}s)"
     )
