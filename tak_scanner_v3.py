@@ -439,6 +439,8 @@ class TakScannerV3:
                         )
 
                 graded = self.scorer.score(raw)
+                logger.info("GRADE | pair=%s engine=%s grade=%s score=%s", pair, engine_id, graded.get("grade"), 
+                graded.get("score"))
                 v2 = score_v2_shadow(raw)
                 if graded.get("grade") == "F":
                     continue
