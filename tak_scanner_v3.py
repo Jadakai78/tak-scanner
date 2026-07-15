@@ -399,6 +399,12 @@ class TakScannerV3:
         for item in active:
             pair = item["pair"]
             df = self.df_from_universe_item(item)
+            logger.info(
+                "DF | pair=%s df_none=%s rows=%s",
+                pair,
+                df is None,
+                None if df is None else len(df),
+            )
             if df is None or len(df) < 60:
                 continue
 
