@@ -159,7 +159,7 @@ class TakScannerV3:
 
     @staticmethod
     def df_from_universe_item(item: Dict[str, Any]) -> Optional[pd.DataFrame]:
-        raw = item.get("ohlc4h")
+        raw = item.get("ohlc_4h")
         if not raw:
             return None
         try:
