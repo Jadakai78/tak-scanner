@@ -523,7 +523,7 @@ class TakScannerV3:
 
 
 if __name__ == "__main__":
-    scanner = TakScannerV3(max_pairs=None)
+    scanner = TakScannerV3(maxpairs=None)
     results = scanner.run_scan()
     print(
         f"Scan complete: {results['signals_fired']} signals, "
