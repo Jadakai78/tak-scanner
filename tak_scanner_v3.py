@@ -148,7 +148,7 @@ class TakScannerV3:
 
     @staticmethod
     def _next_scan_time(now: datetime) -> datetime:
-        logger.info("next_scan_dt=%r type=%s", next_scan_dt, type(next_scan_dt))
+        logger.info("next_scan": next_scan_dt.isoformat(), next_scan_dt, type(next_scan_dt))
         """Compute the next Tier-1 scan timestamp (UTC)."""
         candidates = []
         for h in SCAN_HOURS_UTC:
