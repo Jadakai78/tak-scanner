@@ -413,9 +413,13 @@ class TakScannerV3:
 
             for engine_id in REGIME_ENGINES.get(regime, []):
                 raw = self.run_engine(engine_id, pair, df, regime, fg_score, aist)
-                if raw is None or not raw.get("bias"):
+                logger.info("ENGINE | pair=%s engine=%s raw_none=%s", pair, engine_id, raw is None)
+                if raw is None:
                     continue
-
+                logger.info("BIAS | pair=%s engine=%s bias=%s", pair, engine_id, raw.get("bias"))
+                if not raw.get("bias"):
+                    continue
+                    
                 raw["regime"] = regime
                 raw["aistdirection"] = aist.get("direction")
                 raw["aiststrength"] = aist.get("signalstrength")
