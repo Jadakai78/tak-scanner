@@ -478,29 +478,50 @@ class TakScannerV3:
             "scandurationsec": round(time.time() - start, 2),
         }
 
-        self.bus.update(
-            lastscan=now.isoformat(),
-            nextscan=self.next_scan_time(now).isoformat(),
-            fg=fg,
-            activepairs=len(active),
-            deadpairs=dead_count,
-            signals=signals,
-            killedsignals=killed,
-            regimemap=regime_map,
-            sessionstats=stats,
-            quiethours=quiet,
-            sprintmode=sprintmode,
-        )
-        self.fire_alerts(sammy, quiet, sprintmode)
+self.bus.update(
+    last_scan=now.isoformat(),
+    next_scan=self.next_scan_time(now).isoformat(),
+    fg=fg,
+    active_pairs=len(active),
+    dead_pairs=dead_count,
+    signals=signals,
+    killed_signals=killed,
+    regime_map=regime_map,
+    session_stats=stats,
+    quiet_hours=quiet,
+    sprint_mode=sprintmode,
+)
 
-        logger.info(
-            "Scan complete: %d fired, %d killed, %d S-grade in %.1fs",
-            stats["signalsfired"],
-            stats["signalskilled"],
-            stats["sgradecount"],
-            stats["scandurationsec"],
-        )
-        return stats
+# Ultra-kill feed push → Cloudflare Worker KV
+try:
+    worker_url = "https://jhl-signal-bus.blazing0478.workers.dev/update"
+    # SignalBus writes JSON to /app/signal_bus.json in Railway
+    bus_path = Path("/app/signal_bus.json")
+    payload = bus_path.read_text(encoding="utf-8")
+
+    resp = requests.post(
+        worker_url,
+        data=payload,
+        headers={
+            "Content-Type": "application/json",
+            "X-JHL-Secret": "jhl2026dragon",
+        },
+        timeout=20,
+    )
+    resp.raise_for_status()
+    logger.info("Worker push OK: %s", resp.status_code)
+except Exception as exc:  # noqa: BLE001
+    logger.warning("Worker push failed: %s", exc)
+
+self.fire_alerts(sammy, quiet, sprintmode)
+logger.info(
+    "Scan complete: %d fired, %d killed, %d S-grade in %.1fs",
+    stats["signals_fired"],
+    stats["signals_killed"],
+    stats["s_grade_count"],
+    stats["scan_duration_sec"],
+)
+return stats
 
 
 if __name__ == "__main__":
