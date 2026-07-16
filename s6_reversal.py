@@ -45,7 +45,7 @@ class S6Reversal:
         ohlc_df: pd.DataFrame,
         regime: str,
         fg_score: int,
-        ai_st: Optional[Dict[str, Any]] = None,
+        aist: Optional[Dict[str, Any]] = None,
     ) -> Optional[Dict[str, Any]]:
         """Detect a reversal candle at a key level with a SuperTrend flip.
 
