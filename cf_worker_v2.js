@@ -104,15 +104,19 @@ const HTML = `<!DOCTYPE html>
   }
   .regime-chip .pr { font-weight: 700; }
   .regime-chip .rg { font-size: 10px; padding: 1px 6px; border-radius: 4px; }
+  .rg-TRENDUP { color: var(--long); background: rgba(34,197,94,.12); }
+  .rg-TRENDDOWN { color: var(--short); background: rgba(239,68,68,.12); }
+  .rg-RANGE { color: var(--caution); background: rgba(245,158,11,.12); }
+  .rg-VOLATILE { color: var(--grade-s); background: rgba(245,197,24,.12); }
 
   .signal-card {
-    background: var(--panel-2); border: 1px solid var(--border); border-left: 3px solid var(--muted);
+    background: var(--panel-2); border: 1px solid var(--border);
     border-radius: 8px; padding: 12px 14px; margin-bottom: 10px;
-    cursor: pointer; transition: border-color .15s;
+    cursor: pointer; transition: border-color .15s, transform .12s ease;
   }
-  .signal-card.long { border-left-color: var(--long); }
-  .signal-card.short { border-left-color: var(--short); }
-  .signal-card:active { border-color: var(--accent); }
+  .signal-card.long { box-shadow: inset 3px 0 0 var(--long); }
+  .signal-card.short { box-shadow: inset 3px 0 0 var(--short); }
+  .signal-card:active { border-color: var(--accent); transform: scale(.997); }
   .sig-top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
   .sig-pair { font-size: 16px; font-weight: 700; }
   .sig-bias { font-size: 11px; padding: 2px 8px; border-radius: 4px; font-weight: 700; margin-left: 8px; }
@@ -208,13 +212,13 @@ const HTML = `<!DOCTYPE html>
 
     <div>
       <div class="panel">
-        <h2>Regime Map <span class="badge" id="regime-count">0</span></h2>
-        <div class="regime-map" id="regime-map"><div class="empty">—</div></div>
+        <h2>🎯 RTS Sniper <span class="badge" id="rts-count">0</span></h2>
+        <div id="rts-signals"><div class="empty">RTS Sniper — no kill shots this cycle.</div></div>
       </div>
 
       <div class="panel">
-        <h2>🎯 RTS Sniper <span class="badge" id="rts-count">0</span></h2>
-        <div id="rts-signals"><div class="empty">RTS Sniper — no kill shots this cycle.</div></div>
+        <h2>Regime Map <span class="badge" id="regime-count">0</span></h2>
+        <div class="regime-map" id="regime-map"><div class="empty">—</div></div>
       </div>
 
       <div class="panel">
@@ -224,10 +228,10 @@ const HTML = `<!DOCTYPE html>
 
       <div class="panel">
         <h2>Eval Progress</h2>
-        <div style="font-size:11px;color:var(--muted)">Quiet hours (10PM–5AM CDT)</div>
+        <div style="font-size:11px;color:var(--muted)">Signal bus health</div>
         <div class="eval-bar-wrap">
-          <div class="eval-bar" id="quiet-bar" style="width:0%"></div>
-          <div class="eval-bar-label" id="quiet-label">—</div>
+          <div class="eval-bar" id="health-bar" style="width:0%"></div>
+          <div class="eval-bar-label" id="health-label">—</div>
         </div>
         <div style="font-size:11px;color:var(--muted);margin-top:12px">Scan duration</div>
         <div class="eval-bar-wrap">
@@ -292,15 +296,29 @@ function renderStats(bus) {
   document.getElementById("s-killed").textContent = st.signals_killed || 0;
   document.getElementById("s-sgrade").textContent = st.s_grade_count || 0;
 
-  const quiet = !!bus.quiet_hours;
-  document.getElementById("quiet-bar").style.width = quiet ? "100%" : "0%";
-  document.getElementById("quiet-bar").style.background = quiet ? "var(--caution)" : "var(--long)";
-  document.getElementById("quiet-label").textContent = quiet ? "ALERTS OFF (10PM–5AM)" : "ACTIVE";
+  const hasFreshScan = !!bus.last_scan;
+  document.getElementById("health-bar").style.width = hasFreshScan ? "100%" : "0%";
+  document.getElementById("health-bar").style.background = hasFreshScan ? "var(--long)" : "var(--short)";
+  document.getElementById("health-label").textContent = hasFreshScan ? "BUS LIVE" : "NO BUS DATA";
 
   const dur = Number(st.scan_duration_sec) || 0;
-  const durPct = Math.max(4, Math.min(100, (dur / 60) * 100));
+  const durPct = dur ? Math.max(4, Math.min(100, (dur / 60) * 100)) : 0;
   document.getElementById("dur-bar").style.width = durPct + "%";
   document.getElementById("dur-label").textContent = dur ? dur.toFixed(1) + "s" : "—";
+}
+
+function renderRegime(map) {
+  const el = document.getElementById("regime-map");
+  const entries = Object.entries(map || {});
+  document.getElementById("regime-count").textContent = entries.length;
+  if (!entries.length) {
+    el.innerHTML = '<div class="empty">—</div>';
+    return;
+  }
+  el.innerHTML = entries.map(([pair, regime]) => {
+    const rg = String(regime || "UNKNOWN").toUpperCase();
+    return \`<div class="regime-chip"><span class="pr">${esc(pair)}</span><span class="rg rg-${esc(rg)}">${esc(rg)}</span></div>\`;
+  }).join("");
 }
 
 function signalCard(s, idx) {
@@ -315,9 +333,9 @@ function signalCard(s, idx) {
   if (s.remi_caution || s.remicaution) {
     tags.push('<span class="tag caution">CAUTION</span>');
   }
-  tags.push(`<span class="tag mtf-${esc(mtf)}">MTF ${esc(mtf)}</span>`);
+  tags.push(\`<span class="tag mtf-${esc(mtf)}">MTF ${esc(mtf)}</span>\`);
 
-  return `
+  return \`
     <div class="signal-card ${bias.toLowerCase()}" onclick="openModal(${idx})">
       <div class="sig-top">
         <div>
@@ -339,23 +357,23 @@ function signalCard(s, idx) {
         <div class="lvl"><div class="lk">MTF</div><div class="lv">${num(s.mtf_score || s.mtfscore, 2)}</div></div>
       </div>
       <div class="sig-tags">${tags.join("")}</div>
-    </div>`;
+    </div>\`;
+}
+
+function isAttackReadySignal(s) {
+  const action = String(s.action_state || s.actionstate || "").toUpperCase();
+  const intent = String(s.intent || "").toUpperCase();
+  const grade = String(s.grade || "").toUpperCase();
+  if (s.feed_eligible === false || s.feedeligible === false) return false;
+  if (intent === "WAIT" || intent === "PROBE") return false;
+  if (action && action !== "CLICK") return false;
+  return grade === "S" || grade === "A";
 }
 
 function renderSignals(signals) {
   const el = document.getElementById("signals");
   const raw = Array.isArray(signals) ? signals : [];
-  const list = raw.filter((s) => {
-    const action = String(s.action_state || s.actionstate || "").toUpperCase();
-    const intent = String(s.intent || "").toUpperCase();
-    const grade = String(s.grade || "").toUpperCase();
-
-    if (s.feed_eligible === false || s.feedeligible === false) return false;
-    if (action === "WAIT" || intent === "WAIT" || intent === "PROBE") return false;
-    if (action && action !== "CLICK") return false;
-
-    return grade === "S" || grade === "A";
-  });
+  const list = raw.filter(isAttackReadySignal);
 
   document.getElementById("sig-count").textContent = list.length;
   if (!list.length) {
@@ -394,11 +412,11 @@ function renderKilled(killed) {
     el.innerHTML = '<div class="empty">No kills this cycle.</div>';
     return;
   }
-  el.innerHTML = list.map((k) => `
+  el.innerHTML = list.map((k) => \`
     <div class="kill-row">
       <span><b>${esc(k.pair)}</b> ${esc(k.bias || "")} ${esc(k.engine || "")}</span>
       <span class="kill-reason">${esc(k.kill_reason || k.killreason || "KILLED")}</span>
-    </div>`).join("");
+    </div>\`).join("");
 }
 
 let busData = null;
@@ -407,7 +425,7 @@ window.__liveSignals = [];
 function openModal(idx) {
   const s = window.__liveSignals[idx];
   if (!s) return;
-  alert(`${s.pair} ${s.bias} ${s.grade} | ${s.engine} | intent=${s.intent || "—"}`);
+  alert(\`${s.pair} ${s.bias} ${s.grade} | ${s.engine} | intent=${s.intent || "—"}\`);
 }
 
 function render(bus) {
@@ -415,15 +433,15 @@ function render(bus) {
   busData = bus;
   renderFng(bus.f_g || bus.fg);
   renderStats(bus);
+  renderRTSSignals(bus.signals || []);
   renderRegime(bus.regime_map || {});
   renderSignals(bus.signals || []);
-  renderRTSSignals(bus.signals || []);
   renderKilled(bus.killed_signals || []);
   const lastIso = bus.last_scan;
   const last = lastIso ? new Date(lastIso).getTime() : 0;
   const age = last ? Date.now() - last : Infinity;
-  if (age < STALE_MS) setConn("live", `live • ${fmtTime(lastIso)}`);
-  else if (isFinite(age)) setConn("stale", `stale • ${fmtTime(lastIso)}`);
+  if (age < STALE_MS) setConn("live", \`live • ${fmtTime(lastIso)}\`);
+  else if (isFinite(age)) setConn("stale", \`stale • ${fmtTime(lastIso)}\`);
   else setConn("off", "no scan data");
 }
 
@@ -446,7 +464,7 @@ fileInput.addEventListener("change", (e) => {
   const f = e.target.files[0]; if (!f) return;
   const reader = new FileReader();
   reader.onload = () => {
-    try { render(JSON.parse(reader.result)); setConn("live", `loaded ${f.name}`); }
+    try { render(JSON.parse(reader.result)); setConn("live", \`loaded ${f.name}\`); }
     catch { setConn("off", "invalid JSON"); }
   };
   reader.readAsText(f);
@@ -461,7 +479,7 @@ drop.addEventListener("drop", (e) => {
   const f = e.dataTransfer.files[0]; if (!f) return;
   const reader = new FileReader();
   reader.onload = () => {
-    try { render(JSON.parse(reader.result)); setConn("live", `loaded ${f.name}`); }
+    try { render(JSON.parse(reader.result)); setConn("live", \`loaded ${f.name}\`); }
     catch { setConn("off", "invalid JSON"); }
   };
   reader.readAsText(f);
