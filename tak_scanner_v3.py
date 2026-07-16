@@ -465,7 +465,7 @@ class TakScannerV3:
                 raw["atrpct"] = item.get("atrpct", 0.0)
                 raw["volumeratio"] = item.get("volumeratio", 1.0)
                 microenrich(raw, df, active)
-                apply_phasepath(raw, df, engineid)
+                apply_phasepath(raw, df, engine_id)
 
                 if str(raw.get("engine", "")).startswith("RTS"):
                     delta_ctx = score_delta_context(df, raw.get("bias", "LONG"))
