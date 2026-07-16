@@ -498,7 +498,7 @@ class TakScannerV3:
                    signal=raw,
                    ohlc_daily=daily_df,
                    fg_score=fg_score,
-                )
+               )
                 logger.info(
                     "REMI | pair=%s engine=%s status=%s reason=%s",
                     pair,
