@@ -134,7 +134,7 @@ class TakScannerV3:
         self.scorer = ConvictionScorer()
         self.remi = Remi()
         self.bus = SignalBus()
-        self.s8 = S8MTFConfluence(fetch_ohlc=self.universe.fetch_ohlc, ai_supertrend=self .aist)
+        self.s8 = S8MTFConfluence(fetch_ohlc=self.universe.fetch_ohlc, ai_supertrend=self.aist)
 
     def fetch_fg(self) -> Dict[str, Any]:
         try:
@@ -256,6 +256,31 @@ class TakScannerV3:
         return False
 
     @staticmethod
+    def btc_safe_mode_pass(enriched: Dict[str, Any]) -> bool:
+        pair = str(enriched.get("pair", "")).upper()
+        if "BTC" not in pair:
+            return True
+
+        required_fields = [
+            enriched.get("aistdirection"),
+            enriched.get("aiststrength"),
+            enriched.get("mtfverdict"),
+            enriched.get("structurequality"),
+            enriched.get("volumeratio"),
+        ]
+        if any(v is None for v in required_fields):
+            return False
+
+        if enriched.get("remistatus") == "KILLED":
+            return False
+
+        intent = str(enriched.get("intent", "WAIT"))
+        if intent in {"IGNORE", "CUT"}:
+            return False
+
+        return True
+
+    @staticmethod
     def finalize_signal(
         raw: Dict[str, Any],
         graded: Dict[str, Any],
@@ -287,6 +312,7 @@ class TakScannerV3:
             "rr": raw.get("rr"),
             "regime": raw.get("regime"),
             "structurequality": raw.get("structurequality"),
+            "volumeratio": raw.get("volumeratio"),
             "remistatus": verdict.get("status"),
             "remicaution": verdict.get("caution"),
             "killreason": verdict.get("reason"),
@@ -426,7 +452,7 @@ class TakScannerV3:
                 logger.info("BIAS | pair=%s engine=%s bias=%s", pair, engine_id, raw.get("bias"))
                 if not raw.get("bias"):
                     continue
-                    
+
                 raw["regime"] = regime
                 raw["aistdirection"] = aist.get("direction")
                 raw["aiststrength"] = aist.get("signalstrength")
@@ -498,7 +524,7 @@ class TakScannerV3:
                             "gimba_message": enriched.get("gimba_message"),
                         }
                     )
-                elif pair in PROP_WHITELIST:
+                elif pair in PROP_WHITELIST and self.btc_safe_mode_pass(enriched):
                     signals.append(enriched)
 
         signals.sort(
