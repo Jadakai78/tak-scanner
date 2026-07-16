@@ -134,12 +134,17 @@ class S8MTFConfluence:
             return 0.5
         return 0.0
 
+        if rawbias not in ("LONG", "SHORT"):
+            return 0.0
+
+        pair_key = item.getpairkey() if callable(item.getpairkey) else item.getpairkey
+
         mtf = self.s8.score_mtf(
             pair=pair,
             bias=rawbias,
             ohlc_4h=df,
-            pair_key=item.getpairkey,
-    )
+            pair_key=pair_key,
+        )
         """Score multi-timeframe confluence for a proposed signal.
 
         Args:
