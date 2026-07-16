@@ -134,13 +134,12 @@ class S8MTFConfluence:
             return 0.5
         return 0.0
 
-    def score_mtf(
-        self,
-        pair: str,
-        bias: str,
-        ohlc_4h: pd.DataFrame,
-        pair_key: Optional[str] = None,
-    ) -> Dict[str, Any]:
+        mtf = self.s8.score_mtf(
+            pair=pair,
+            bias=rawbias,
+            ohlc_4h=df,
+            pair_key=item.getpairkey,
+    )
         """Score multi-timeframe confluence for a proposed signal.
 
         Args:
