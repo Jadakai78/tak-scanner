@@ -1,5 +1,6 @@
-from phasepath import apply_phasepath
 from __future__ import annotations
+
+from phasepath import apply_phasepath
 
 import json
 import logging
