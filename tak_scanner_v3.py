@@ -493,12 +493,13 @@ class TakScannerV3:
 
                 if daily_df is None:
                     daily_df = self.universe.fetch_ohlc(item["pairkey"], interval=1440)
-
-               verdict = self.remi.evaluate(
-                   signal=raw,
-                   ohlc_daily=daily_df,
-                   fg_score=fg_score,
-               )
+                    
+                raw["conviction"] = graded["score"]
+                verdict = self.remi.evaluate(
+                    signal=raw,
+                    ohlc_daily=daily_df,
+                    fg_score=fg_score,
+                )
                 logger.info(
                     "REMI | pair=%s engine=%s status=%s reason=%s",
                     pair,
