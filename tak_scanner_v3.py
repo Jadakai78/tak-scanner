@@ -1,7 +1,8 @@
+"""tak_scanner_v3.py"""
+
 from __future__ import annotations
 
 from phasepath import apply_phasepath
-
 import json
 import logging
 import time
