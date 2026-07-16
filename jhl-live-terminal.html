@@ -1,6 +1,166 @@
 <!DOCTYPE html>
 <html lang="en">
+<head><!DOCTYPE html>
+<html lang="en">
 <head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta name="theme-color" content="#0f1115" />
+<title>JHL Live Terminal</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+:root,[data-theme="light"]{--bg:#f5f3ee;--surface:#fbfaf7;--surface-2:#f1eee8;--surface-3:#e6e2da;--line:#d6d1c7;--text:#1f221f;--muted:#6f746c;--faint:#9ca197;--primary:#0d6b6f;--primary-2:#114c4f;--success:#2c7a4b;--warning:#af6e10;--danger:#b44040;--gold:#b88a15;--shadow:0 8px 24px rgba(32,32,24,.08)}
+[data-theme="dark"]{--bg:#111317;--surface:#171a1f;--surface-2:#1d2128;--surface-3:#262c36;--line:#313846;--text:#e6e9ee;--muted:#9aa3b2;--faint:#667080;--primary:#5db1b5;--primary-2:#86cdd0;--success:#5fc084;--warning:#e0a84b;--danger:#ef7373;--gold:#f0c25b;--shadow:0 12px 28px rgba(0,0,0,.28)}
+*{box-sizing:border-box;margin:0;padding:0} html{-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility} body{font-family:Inter,system-ui,sans-serif;background:var(--bg);color:var(--text);min-height:100vh} button,input,select{font:inherit} button{cursor:pointer;border:none;background:none;color:inherit} code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace} .app{max-width:1480px;margin:0 auto;padding:20px} .header{display:flex;justify-content:space-between;gap:16px;align-items:flex-start;margin-bottom:18px} .brand{display:flex;gap:14px;align-items:center} .logo{width:44px;height:44px;border-radius:12px;background:linear-gradient(135deg,var(--primary),var(--primary-2));display:grid;place-items:center;box-shadow:var(--shadow)} .logo svg{width:24px;height:24px;color:white} .title h1{font-size:clamp(1.4rem,1rem + 1.2vw,2rem);font-weight:800;letter-spacing:-.03em} .title p{color:var(--muted);margin-top:4px;font-size:.95rem} .header-actions{display:flex;gap:10px;align-items:center;flex-wrap:wrap} .pill{display:inline-flex;align-items:center;gap:8px;padding:10px 12px;border-radius:999px;background:var(--surface);border:1px solid var(--line)} .dot{width:8px;height:8px;border-radius:50%;background:var(--faint)} .dot.live{background:var(--success);box-shadow:0 0 12px color-mix(in srgb,var(--success) 70%, transparent)} .dot.stale{background:var(--warning);box-shadow:none} .dot.offline{background:var(--danger);box-shadow:none} .btn{padding:10px 14px;border-radius:12px;background:var(--surface);border:1px solid var(--line);transition:.18s ease} .btn:hover{border-color:var(--primary);color:var(--primary)} .tabs{display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin-bottom:18px} .tab{padding:14px 12px;border-radius:14px;background:var(--surface);border:1px solid var(--line);text-align:left} .tab small{display:block;color:var(--muted);font-size:.76rem;text-transform:uppercase;letter-spacing:.08em;margin-bottom:6px} .tab strong{font-size:.98rem} .tab.active{border-color:var(--primary);box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--primary) 35%, transparent)} .kpis{display:grid;grid-template-columns:repeat(6,1fr);gap:12px;margin-bottom:18px} .card{background:var(--surface);border:1px solid var(--line);border-radius:18px;box-shadow:var(--shadow)} .kpi{padding:14px} .kpi .label{font-size:.74rem;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;margin-bottom:6px} .kpi .value{font-size:1.5rem;font-weight:800;letter-spacing:-.03em} .kpi .sub{margin-top:4px;color:var(--muted);font-size:.84rem} .layout{display:grid;grid-template-columns:2.2fr 1fr;gap:16px} .panel{padding:16px} .panel h2{font-size:.82rem;color:var(--muted);text-transform:uppercase;letter-spacing:.09em;margin-bottom:12px;display:flex;justify-content:space-between;align-items:center} .badge{padding:4px 8px;border-radius:999px;background:var(--surface-2);border:1px solid var(--line);font-size:.76rem;color:var(--muted)} .stack{display:grid;gap:12px} .signal{padding:14px;border-radius:16px;background:var(--surface-2);border:1px solid var(--line)} .signal-top{display:flex;justify-content:space-between;gap:10px;align-items:flex-start;margin-bottom:8px} .signal h3{font-size:1.02rem} .meta{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px} .meta span,.tag{padding:5px 8px;border-radius:999px;background:var(--surface);border:1px solid var(--line);font-size:.76rem;color:var(--muted)} .tag.long{color:var(--success)} .tag.short{color:var(--danger)} .tag.grade{color:var(--gold)} .levels{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:12px} .level{padding:10px;border-radius:12px;background:var(--surface);border:1px solid var(--line)} .level .k{font-size:.7rem;color:var(--muted);text-transform:uppercase;letter-spacing:.08em} .level .v{margin-top:4px;font-weight:700} .mini-list{display:grid;gap:10px} .row{display:flex;justify-content:space-between;gap:10px;padding:10px 0;border-bottom:1px solid var(--line)} .row:last-child{border-bottom:none} .name{font-weight:600} .muted{color:var(--muted)} .healthbar{height:12px;border-radius:999px;background:var(--surface-3);overflow:hidden;border:1px solid var(--line);margin-top:8px} .healthbar span{display:block;height:100%;background:linear-gradient(90deg,var(--warning),var(--success))} .table{width:100%;border-collapse:collapse;font-size:.92rem} .table th,.table td{padding:10px 8px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top} .table th{font-size:.74rem;color:var(--muted);text-transform:uppercase;letter-spacing:.08em} .hidden{display:none} .schema{background:#0d1014;color:#d9e2ef;border-radius:14px;padding:14px;overflow:auto;font-size:.82rem;line-height:1.5;border:1px solid #2d3745} .footer-note{margin-top:18px;color:var(--muted);font-size:.84rem} .empty{padding:14px;border-radius:14px;background:var(--surface-2);border:1px dashed var(--line);color:var(--muted)} @media (max-width:1100px){.kpis{grid-template-columns:repeat(3,1fr)}.layout{grid-template-columns:1fr}.tabs{grid-template-columns:repeat(2,1fr)}} @media (max-width:700px){.app{padding:14px}.header{flex-direction:column}.kpis{grid-template-columns:repeat(2,1fr)}.tabs{grid-template-columns:1fr}.levels{grid-template-columns:repeat(2,1fr)}}
+</style>
+</head>
+<body>
+<div class="app">
+<header class="header">
+<div class="brand"><div class="logo" aria-label="JHL logo"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M4 17V7h4v10"/><path d="M10 7v10h6"/><path d="M18 7v10h2"/></svg></div><div class="title"><h1>JHL Live Terminal</h1><p>Canonical operator console · single snapshot consumer · calm trade surface</p></div></div>
+<div class="header-actions"><div class="pill"><span class="dot" id="connDot"></span><span id="connText">loading snapshot</span></div><div class="pill">FG <strong id="fgScore">—</strong> <span class="muted" id="fgLabel">Awaiting feed</span></div><button class="btn" id="themeBtn" aria-label="Toggle theme">Toggle theme</button></div>
+</header>
+<nav class="tabs" aria-label="Terminal tabs"><button class="tab active" data-tab="overview"><small>Tab 01</small><strong>Overview</strong></button><button class="tab" data-tab="kraken"><small>Tab 02</small><strong>Kraken</strong></button><button class="tab" data-tab="props"><small>Tab 03</small><strong>Props</strong></button><button class="tab" data-tab="trade"><small>Tab 04</small><strong>Trade</strong></button><button class="tab" data-tab="diagnostics"><small>Tab 05</small><strong>Diagnostics</strong></button></nav>
+<section class="kpis" id="kpis"></section>
+<main>
+<section id="overview" class="tab-panel"><div class="layout"><div class="stack"><div class="card panel"><h2>Live Signals <span class="badge" id="liveCount">0</span></h2><div id="liveSignals" class="stack"></div></div></div><div class="stack"><div class="card panel"><h2>RTS Sniper <span class="badge" id="rtsCount">0</span></h2><div id="rtsSignals" class="mini-list"></div></div><div class="card panel"><h2>Regime Map <span class="badge" id="regimeCount">0</span></h2><div id="regimeMap" class="mini-list"></div></div><div class="card panel"><h2>Signal Bus Health</h2><div class="muted" id="healthText">Awaiting health sample.</div><div class="healthbar"><span id="healthBar" style="width:0%"></span></div></div></div></div></section>
+<section id="kraken" class="tab-panel hidden"><div class="card panel"><h2>Kraken Pair Universe <span class="badge" id="krakenCount">0</span></h2><table class="table" id="krakenTable"><thead><tr><th>Pair</th><th>Prop</th><th>ATR%</th><th>24h Vol</th><th>RSI</th><th>Close</th></tr></thead><tbody></tbody></table></div></section>
+<section id="props" class="tab-panel hidden"><div class="card panel"><h2>Prop Eligible Universe <span class="badge" id="propsCount">0</span></h2><table class="table" id="propsTable"><thead><tr><th>Pair</th><th>ATR%</th><th>24h Vol</th><th>RSI</th><th>Volume Ratio</th></tr></thead><tbody></tbody></table></div></section>
+<section id="trade" class="tab-panel hidden"><div class="layout"><div class="card panel"><h2>Attack-Ready Board <span class="badge" id="tradeCount">0</span></h2><div id="tradeSignals" class="stack"></div></div><div class="stack"><div class="card panel"><h2>Killed Signals <span class="badge" id="killedCount">0</span></h2><div id="killedSignals" class="mini-list"></div></div><div class="card panel"><h2>Session Summary</h2><div id="sessionSummary" class="mini-list"></div></div></div></div></section>
+<section id="diagnostics" class="tab-panel hidden"><div class="layout"><div class="card panel"><h2>Diagnostics Stream</h2><div id="diagRows" class="mini-list"></div></div><div class="stack"><div class="card panel"><h2>Canonical Schema</h2><pre class="schema" id="schemaBox"></pre></div><div class="card panel"><h2>Integration Notes</h2><div class="mini-list" id="integrationNotes"></div></div></div></div></section>
+</main>
+<p class="footer-note">Live build: worker-fed bus → adapter module → canonical terminal.</p>
+</div>
+<script type="module">
+import { createCanonicalSnapshot, CANONICAL_TOP_LEVEL_KEYS } from './jhl-snapshot-adapter.module.js';
+
+const canonicalSchema={meta:{version:"string",source:"string",environment:"string",generated_at:"iso8601"},session:{last_scan:"iso8601",next_scan:"iso8601",active_pairs:"number",dead_pairs:"number",pair_universe_count:"number",sprint_mode:"boolean"},health:{status:"live|stale|offline",bus_health_pct:"number",worker_push_ok:"boolean",bus_write_ok:"boolean",scan_duration_sec:"number",fear_greed:{score:"number",label:"string"}},regimes:[{pair:"string",regime:"string"}],signals:[{pair:"string",bias:"LONG|SHORT",grade:"S|A|B|C",engine:"string",conviction:"number",rr:"number",entry:"number",sl:"number",tp:"number",regime:"string",intent:"string",prop:"boolean",mtf:"string"}],alerts:[{type:"string",pair:"string",reason:"string"}],diagnostics:{notes:["string"],latest_runtime:["string"],integration:["string"]}};
+let currentSnapshot = null;
+let lastBus = {};
+
+const fmtNum=(v,d=2)=>Number(v ?? 0).toLocaleString(undefined,{maximumFractionDigits:d});
+const fmtBool=v=>v?"Yes":"No";
+const safeArr=v=>Array.isArray(v)?v:[];
+const safeText=v=>v==null||v===""?"—":String(v);
+function setTheme(){const root=document.documentElement;let mode=window.matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light';root.setAttribute('data-theme',mode);document.getElementById('themeBtn').onclick=()=>{mode=mode==='dark'?'light':'dark';root.setAttribute('data-theme',mode)}}
+
+async function loadLiveBus(){
+  if(window.JHL_LIVE_BUS && typeof window.JHL_LIVE_BUS==='object') return window.JHL_LIVE_BUS;
+  const candidates=['/api/signals','./signal_bus.json'];
+  for(const url of candidates){
+    try{
+      const res=await fetch(url,{cache:'no-store'});
+      if(!res.ok) continue;
+      const data=await res.json();
+      if(data && typeof data==='object') return data;
+    }catch(_){ }
+  }
+  return {};
+}
+
+function getKrakenPairs(bus){
+  if(Array.isArray(bus?.kraken_pairs)) return bus.kraken_pairs;
+  if(Array.isArray(bus?.pair_universe?.rows)) return bus.pair_universe.rows;
+  if(Array.isArray(bus?.pair_universe)) return bus.pair_universe;
+  return [];
+}
+
+function setConnectionState(status){
+  const dot=document.getElementById('connDot');
+  dot.className='dot';
+  if(status==='live') dot.classList.add('live');
+  else if(status==='stale') dot.classList.add('stale');
+  else dot.classList.add('offline');
+}
+
+function emptyCard(text){
+  return `<div class="empty">${text}</div>`;
+}
+
+function renderKpis(snapshot){
+  const kpis=[["Last Scan",safeText(snapshot.session?.last_scan)],["Next Scan",safeText(snapshot.session?.next_scan)],["Active Pairs",safeText(snapshot.session?.active_pairs)],["Signals",safeArr(snapshot.signals).length],["Killed",safeArr(snapshot.alerts).length],["Scan Duration",`${fmtNum(snapshot.health?.scan_duration_sec,2)}s`]];
+  document.getElementById('kpis').innerHTML=kpis.map(([label,value])=>`<div class="card kpi"><div class="label">${label}</div><div class="value">${value}</div><div class="sub">canonical field</div></div>`).join('');
+  document.getElementById('fgScore').textContent=safeText(snapshot.health?.fear_greed?.score);
+  document.getElementById('fgLabel').textContent=safeText(snapshot.health?.fear_greed?.label);
+  document.getElementById('connText').textContent=`${safeText(snapshot.health?.status)} snapshot`;
+  setConnectionState(snapshot.health?.status);
+}
+
+function signalCard(s){return `<article class="signal"><div class="signal-top"><div><h3>${safeText(s.pair)}</h3><div class="meta"><span class="tag ${s.bias==='LONG'?'long':'short'}">${safeText(s.bias)}</span><span class="tag grade">Grade ${safeText(s.grade)}</span><span>${safeText(s.engine)}</span><span>${safeText(s.regime)}</span></div></div><div class="muted">Conv ${fmtNum(s.conviction,2)} · RR ${fmtNum(s.rr,2)}</div></div><div class="levels"><div class="level"><div class="k">Entry</div><div class="v">${fmtNum(s.entry,4)}</div></div><div class="level"><div class="k">Stop</div><div class="v">${fmtNum(s.sl,4)}</div></div><div class="level"><div class="k">Target</div><div class="v">${fmtNum(s.tp,4)}</div></div><div class="level"><div class="k">Intent</div><div class="v">${safeText(s.intent)}</div></div></div><div class="meta"><span>Prop ${fmtBool(s.prop)}</span><span>MTF ${safeText(s.mtf)}</span></div></article>`}
+
+function renderOverview(snapshot){
+  const signals=safeArr(snapshot.signals);
+  document.getElementById('liveSignals').innerHTML=signals.length?signals.map(signalCard).join(''):emptyCard('No live signals in current snapshot.');
+  document.getElementById('liveCount').textContent=signals.length;
+  const rts=signals.filter(s=>["ATTACK","ATTACKBREAK","ATTACKTRAP"].includes(s.intent));
+  document.getElementById('rtsCount').textContent=rts.length;
+  document.getElementById('rtsSignals').innerHTML=rts.length?rts.map(s=>`<div class="row"><span class="name">${safeText(s.pair)}</span><span class="muted">${safeText(s.intent)} · ${safeText(s.grade)}</span></div>`).join(''):emptyCard('No attack-ready intents in current snapshot.');
+  const regimes=safeArr(snapshot.regimes);
+  document.getElementById('regimeCount').textContent=regimes.length;
+  document.getElementById('regimeMap').innerHTML=regimes.length?regimes.map(r=>`<div class="row"><span class="name">${safeText(r.pair)}</span><span class="muted">${safeText(r.regime)}</span></div>`).join(''):emptyCard('No regime rows available.');
+  document.getElementById('healthText').textContent=`Worker push ${snapshot.health?.worker_push_ok?'OK':'FAIL'} · Bus write ${snapshot.health?.bus_write_ok?'OK':'FAIL'} · ${fmtNum(snapshot.health?.scan_duration_sec,2)}s scan`;
+  document.getElementById('healthBar').style.width=`${Number(snapshot.health?.bus_health_pct || 0)}%`;
+}
+
+function renderKraken(){
+  const pairs=getKrakenPairs(lastBus);
+  document.getElementById('krakenCount').textContent=pairs.length;
+  document.querySelector('#krakenTable tbody').innerHTML=pairs.length?pairs.map(p=>`<tr><td>${safeText(p.pair || p.symbol)}</td><td>${fmtBool(Boolean(p.is_prop ?? p.prop))}</td><td>${fmtNum(p.atr_pct,4)}</td><td>${fmtNum(p.volume24h ?? p.volume_24h,2)}</td><td>${fmtNum(p.rsi,2)}</td><td>${fmtNum(p.close,6)}</td></tr>`).join(''):`<tr><td colspan="6">No pair-universe rows available.</td></tr>`;
+}
+
+function renderProps(){
+  const props=getKrakenPairs(lastBus).filter(p=>Boolean(p.is_prop ?? p.prop));
+  document.getElementById('propsCount').textContent=props.length;
+  document.querySelector('#propsTable tbody').innerHTML=props.length?props.map(p=>`<tr><td>${safeText(p.pair || p.symbol)}</td><td>${fmtNum(p.atr_pct,4)}</td><td>${fmtNum(p.volume24h ?? p.volume_24h,2)}</td><td>${fmtNum(p.rsi,2)}</td><td>${fmtNum(p.volume_ratio,4)}</td></tr>`).join(''):`<tr><td colspan="5">No prop-eligible rows available.</td></tr>`;
+}
+
+function renderTrade(snapshot){
+  const trade=safeArr(snapshot.signals).filter(s=>['S','A'].includes(s.grade));
+  document.getElementById('tradeSignals').innerHTML=trade.length?trade.map(signalCard).join(''):emptyCard('No S/A-grade attack board rows in current snapshot.');
+  document.getElementById('tradeCount').textContent=trade.length;
+  const alerts=safeArr(snapshot.alerts);
+  document.getElementById('killedCount').textContent=alerts.length;
+  document.getElementById('killedSignals').innerHTML=alerts.length?alerts.map(a=>`<div class="row"><span class="name">${safeText(a.pair)}</span><span class="muted">${safeText(a.reason)}</span></div>`).join(''):emptyCard('No killed signals in current snapshot.');
+  const sessionRows=[["Active Pairs",safeText(snapshot.session?.active_pairs)],["Pair Universe",safeText(snapshot.session?.pair_universe_count)],["Sprint Mode",fmtBool(snapshot.session?.sprint_mode)],["Bus Health",`${safeText(snapshot.health?.bus_health_pct)}%`]];
+  document.getElementById('sessionSummary').innerHTML=sessionRows.map(([k,v])=>`<div class="row"><span class="name">${k}</span><span class="muted">${v}</span></div>`).join('');
+}
+
+function renderDiagnostics(snapshot){
+  const diagRows=[...safeArr(snapshot.diagnostics?.latest_runtime),...safeArr(snapshot.diagnostics?.notes)];
+  document.getElementById('diagRows').innerHTML=diagRows.length?diagRows.map(x=>`<div class="row"><span class="name">${safeText(x)}</span></div>`).join(''):emptyCard('No diagnostics rows in current snapshot.');
+  document.getElementById('schemaBox').textContent=JSON.stringify({top_level_keys:CANONICAL_TOP_LEVEL_KEYS,schema:canonicalSchema},null,2);
+  const integration=safeArr(snapshot.diagnostics?.integration);
+  document.getElementById('integrationNotes').innerHTML=integration.length?integration.map(x=>`<div class="row"><span class="name">${safeText(x)}</span></div>`).join(''):emptyCard('No integration notes in current snapshot.');
+}
+
+function render(snapshot){
+  currentSnapshot=snapshot;
+  renderKpis(snapshot);
+  renderOverview(snapshot);
+  renderKraken();
+  renderProps();
+  renderTrade(snapshot);
+  renderDiagnostics(snapshot);
+}
+
+function wireTabs(){const tabs=document.querySelectorAll('.tab');const panels=document.querySelectorAll('.tab-panel');tabs.forEach(tab=>tab.addEventListener('click',()=>{tabs.forEach(t=>t.classList.remove('active'));panels.forEach(p=>p.classList.add('hidden'));tab.classList.add('active');document.getElementById(tab.dataset.tab).classList.remove('hidden')}))}
+
+async function refresh(){
+  lastBus = await loadLiveBus();
+  const snapshot=createCanonicalSnapshot(lastBus,{version:'v1',source:'signal_bus_adapter',environment:lastBus.environment||'worker-live'});
+  render(snapshot);
+}
+
+setTheme();
+wireTabs();
+await refresh();
+setInterval(refresh,15000);
+</script>
+</body>
+</html>
+
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <meta name="theme-color" content="#0f1115" />
