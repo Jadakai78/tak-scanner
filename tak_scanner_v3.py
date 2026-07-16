@@ -65,4 +65,23 @@ def compute_sizing(entry: Any, sl: Any) -> Dict[str, Dict[str, Any]]:
     for seat in SEATS:
         if seat["mode"] == "PROTECT_ONLY" or risk_per_unit <= 0:
             sizing[seat["name"]] = {
-                "units"
+                "units": 0,
+                "dollar_risk": 0,
+                "mode": seat["mode"],
+            }
+            continue
+
+        units = round(seat["risk"] / risk_per_unit, 2)
+        sizing[seat["name"]] = {
+            "units": units,
+            "dollar_risk": round(units * risk_per_unit, 2),
+            "mode": seat["mode"],
+        }
+    return sizing
+
+
+def send_sammy_message(message: str) -> None:
+    token = "8860741830:AAGiccCbk4dzoTq97gWIIykZVunDvkkl6ys"
+    chat_id = "7733126931"
+    try:
+    
