@@ -50,7 +50,7 @@ class S7RangeScalper:
             ohlc_df: 4H OHLC DataFrame.
             regime: Must be RANGE.
             fg_score: Fear & Greed score.
-            ai_st: Unused.
+            aist: Unused.
 
         Returns:
             Partial signal dict or ``None``.
