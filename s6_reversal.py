@@ -54,7 +54,7 @@ class S6Reversal:
             ohlc_df: 4H OHLC DataFrame.
             regime: RANGE or FEAR.
             fg_score: Fear & Greed score.
-                        aist: Unused.
+            aist: Unused.
 
         Returns:
             Partial signal dict or ``None``.
