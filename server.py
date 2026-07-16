@@ -20,7 +20,13 @@ ACCOUNTS = [
 
 
 def load_signal_bus():
-    data = json.loads(SIGNAL_BUS.read_text())
+    try:
+        data = json.loads(SIGNAL_BUS.read_text())
+    except FileNotFoundError:
+        import urllib.request
+        with urllib.request.urlopen(FEED_URL, timeout=10) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+
     baselines = data.get("session_baselines", {})
     accounts = []
     for acct in ACCOUNTS:
@@ -34,6 +40,7 @@ def load_signal_bus():
             "recommended_risk_per_trade": acct["recommended_risk_per_trade"],
             "mode": "FULL_AGGRESSION",
         })
+
     data["accounts"] = accounts
     return data
 
