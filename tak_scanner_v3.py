@@ -459,7 +459,7 @@ class TakScannerV3:
                 raw["aistdirection"] = aist.get("direction")
                 raw["aiststrength"] = aist.get("signalstrength")
 
-                mtf = self.s8.score_mtf(pair, raw["bias"], df, pairkey=item.get("pairkey"))
+                mtf = self.s8.score_mtf(pair, raw["bias"], df, pair_key=item.get("pairkey"))
                 raw["mtfalignment"] = mtf.get("mtfverdict")
                 raw["atrpct"] = item.get("atrpct", 0.0)
                 raw["volumeratio"] = item.get("volumeratio", 1.0)
