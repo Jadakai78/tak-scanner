@@ -45,6 +45,8 @@ class S7RangeScalper:
         fg_score: int,
         aist: Optional[Dict[str, Any]] = None,
     ) -> Optional[Dict[str, Any]]:
+        """Scalp a range edge inside a confirmed flat-EMA range.
+
         Args:
             pair: Pair symbol.
             ohlc_df: 4H OHLC DataFrame.
@@ -55,6 +57,7 @@ class S7RangeScalper:
         Returns:
             Partial signal dict or ``None``.
         """
+        
         if regime not in self.REQUIRED_REGIMES:
             return None
         df = ohlc_df.reset_index(drop=True)
