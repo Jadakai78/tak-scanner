@@ -151,7 +151,6 @@ class TakScannerV3:
 
     @staticmethod
     def _next_scan_time(now: datetime) -> datetime:
-        """Compute the next Tier-1 scan timestamp (UTC)."""
         candidates = []
         for h in SCAN_HOURS_UTC:
             t = now.replace(hour=h, minute=SCAN_MINUTE_UTC, second=0, microsecond=0)
@@ -449,10 +448,10 @@ class TakScannerV3:
 
             for engine_id in REGIME_ENGINES.get(regime, []):
                 raw = self.run_engine(engine_id, pair, df, regime, fg_score, aist)
-                logger.info("ENGINE | pair=%s engine=%s raw_none=%s", pair, engine_id, raw is None)
+                logger.info("TAK | pair=%s engine=%s raw_none=%s", pair, engine_id, raw is None)
                 if raw is None:
                     continue
-                logger.info("BIAS | pair=%s engine=%s bias=%s", pair, engine_id, raw.get("bias"))
+                logger.info("TAK | pair=%s engine=%s bias=%s", pair, engine_id, raw.get("bias"))
                 if not raw.get("bias"):
                     continue
 
@@ -481,7 +480,7 @@ class TakScannerV3:
 
                 graded = self.scorer.score(raw)
                 logger.info(
-                    "GRADE | pair=%s engine=%s grade=%s score=%s",
+                    "TAK | pair=%s engine=%s grade=%s score=%s",
                     pair,
                     engine_id,
                     graded.get("grade"),
@@ -489,26 +488,25 @@ class TakScannerV3:
                 )
                 v2 = score_v2_shadow(raw)
                 if graded.get("grade") == "F":
+                    logger.info("TAK | pair=%s engine=%s route=DROP_GRADE_F", pair, engine_id)
                     continue
 
                 if daily_df is None:
                     daily_df = self.universe.fetch_ohlc(item["pairkey"], interval=1440)
-                    
-                graded = ...
-                raw["conviction"] = graded["score"]
+
+                raw["conviction"] = graded.get("score")
                 verdict = self.remi.evaluate(
                     signal=raw,
                     ohlc_daily=daily_df,
                     fg_score=fg_score,
                 )
-                if verdict["status"] == "KILLED":
-                    ...
                 logger.info(
-                    "REMI | pair=%s engine=%s status=%s reason=%s",
+                    "REMI | pair=%s engine=%s status=%s reason=%s caution=%s",
                     pair,
                     engine_id,
                     verdict.get("status"),
                     verdict.get("reason"),
+                    verdict.get("caution"),
                 )
 
                 rts = self.resolve_rts(raw, graded, mtf)
@@ -517,8 +515,28 @@ class TakScannerV3:
                 enriched = self.finalize_signal(
                     raw, graded, mtf, aist, verdict, now, active, v2, rts, action_state
                 )
+                logger.info(
+                    "COUNCIL | pair=%s engine=%s intent=%s tier=%s action=%s grade=%s remi=%s",
+                    pair,
+                    engine_id,
+                    rts.get("intent"),
+                    tier,
+                    action_state,
+                    graded.get("grade"),
+                    verdict.get("status"),
+                )
+
+                btc_safe = self.btc_safe_mode_pass(enriched)
+                in_prop = pair in PROP_WHITELIST
 
                 if verdict.get("status") == "KILLED" or self.should_cut_now(enriched):
+                    logger.info(
+                        "APRIL | pair=%s engine=%s route=KILLED reason=%s intent=%s",
+                        pair,
+                        engine_id,
+                        verdict.get("reason") or "cut_now",
+                        rts.get("intent"),
+                    )
                     killed.append(
                         {
                             "pair": pair,
@@ -531,8 +549,28 @@ class TakScannerV3:
                             "gimba_message": enriched.get("gimba_message"),
                         }
                     )
-                elif pair in PROP_WHITELIST and self.btc_safe_mode_pass(enriched):
+                elif in_prop and btc_safe:
+                    logger.info(
+                        "APRIL | pair=%s engine=%s route=APPEND prop=%s btcsafe=%s grade=%s intent=%s",
+                        pair,
+                        engine_id,
+                        in_prop,
+                        btc_safe,
+                        enriched.get("grade"),
+                        enriched.get("intent"),
+                    )
                     signals.append(enriched)
+                else:
+                    logger.info(
+                        "APRIL | pair=%s engine=%s route=SUPPRESS prop=%s btcsafe=%s grade=%s intent=%s remi=%s",
+                        pair,
+                        engine_id,
+                        in_prop,
+                        btc_safe,
+                        enriched.get("grade"),
+                        enriched.get("intent"),
+                        enriched.get("remistatus"),
+                    )
 
         signals.sort(
             key=lambda sig: (
@@ -603,6 +641,7 @@ class TakScannerV3:
             stats["scan_duration_sec"],
         )
         return stats
+
 
 if __name__ == "__main__":
     scanner = TakScannerV3(maxpairs=None)
