@@ -43,10 +43,8 @@ class S7RangeScalper:
         ohlc_df: pd.DataFrame,
         regime: str,
         fg_score: int,
-        ai_st: Optional[Dict[str, Any]] = None,
+        aist: Optional[Dict[str, Any]] = None,
     ) -> Optional[Dict[str, Any]]:
-        """Scalp a range edge inside a confirmed flat-EMA range.
-
         Args:
             pair: Pair symbol.
             ohlc_df: 4H OHLC DataFrame.
