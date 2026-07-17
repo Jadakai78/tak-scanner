@@ -64,7 +64,7 @@ class ScannerSpecialistRegistry:
                 raw["volumeratio"] = source_item.get("volumeratio", 1.0)
 
                 micro_enrich(raw, df, [source_item])
-                applyphasepath(raw, df, specialist_id)
+                apply_phasepath(raw, df, specialist_id)
 
                 try:
                     deltactx = scoredeltacontext(df, raw.get("bias", "LONG"))
