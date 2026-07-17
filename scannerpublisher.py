@@ -1,65 +1,68 @@
 from __future__ import annotations
 
-import json
-import logging
-from pathlib import Path
-from typing import Any
+from typing import Any, Dict
 
-import requests
-
-from scannermodels import ScanResult
-from signalbusschema import build_signal_bus_payload
+from scannermodels import CandidateSignal, PublishedSignal
 
 
-logger = logging.getLogger("scannerpublisher")
+def publish_candidate(candidate: CandidateSignal, bucket: str) -> PublishedSignal:
+    review = candidate.review
+    council = candidate.council
 
+    score = candidate.score
+    warnings = list(candidate.warnings)
 
-class ScannerPublisher:
-    """
-    Simple V4 publisher:
-    - build one signal bus payload from ScanResult
-    - write to app/signalbus.json
-    - push to worker
-    - return the original ScanResult unchanged
-    """
+    if review is not None:
+        score = review.adjusted_score
+        warnings.extend(review.caution_flags)
 
-    def __init__(
-        self,
-        app_dir: Path,
-        worker_url: str,
-        worker_secret: str,
-    ) -> None:
-        self.app_dir = app_dir
-        self.worker_url = worker_url
-        self.worker_secret = worker_secret
+    route = bucket
+    execution_ready = False
+    if council is not None:
+        route = council.route
+        execution_ready = council.execution_ready
+        warnings.extend(council.veto_reasons)
 
-        self.bus_path = self.app_dir / "signalbus.json"
+    payload: Dict[str, Any] = {
+        "pair": candidate.pair,
+        "setup_type": candidate.setup_type,
+        "side": candidate.side,
+        "specialist": candidate.specialist,
+        "confidence": candidate.confidence,
+        "entry_idea": candidate.entry_idea,
+        "stop_idea": candidate.stop_idea,
+        "target_idea": candidate.target_idea,
+        "evidence": dict(candidate.evidence),
+        "context": dict(candidate.context),
+        "review": None if review is None else {
+            "decision": review.decision,
+            "adjusted_score": review.adjusted_score,
+            "confidence_delta": review.confidence_delta,
+            "rationale": review.rationale,
+            "caution_flags": list(review.caution_flags),
+            "evidence_notes": list(review.evidence_notes),
+        },
+        "council": None if council is None else {
+            "decision": council.decision,
+            "battlefield_ok": council.battlefield_ok,
+            "veto_reasons": list(council.veto_reasons),
+            "route": council.route,
+            "execution_ready": council.execution_ready,
+        },
+    }
 
-    def publish(self, result: ScanResult) -> ScanResult:
-        payload_dict = build_signal_bus_payload(result)
-
-        try:
-            text = json.dumps(payload_dict, ensure_ascii=False, indent=2)
-            self.bus_path.write_text(text, encoding="utf-8")
-            logger.info(
-                "BUS WRITE OK live=%d caution=%d killed=%d",
-                len(result.live_signals),
-                len(result.caution_signals),
-                len(result.killed_signals),
-            )
-        except Exception as exc:
-            logger.warning("BUS WRITE FAILED err=%s", exc)
-
-        try:
-            data = self.bus_path.read_text(encoding="utf-8")
-            headers = {
-                "Content-Type": "application/json",
-                "X-JHL-Secret": self.worker_secret,
-            }
-            resp = requests.post(self.worker_url, data=data, headers=headers, timeout=20)
-            resp.raise_for_status()
-            logger.info("Worker push OK status=%s", resp.status_code)
-        except Exception as exc:
-            logger.warning("Worker push failed err=%s", exc)
-
-        return result
+    return PublishedSignal(
+        bucket=bucket,
+        pair=candidate.pair,
+        candidate_id=candidate.candidate_id,
+        setup_type=candidate.setup_type,
+        side=candidate.side,
+        score=round(float(score), 2),
+        specialist=candidate.specialist,
+        thesis=candidate.thesis,
+        route=route,
+        execution_ready=execution_ready,
+        warnings=warnings,
+        tags=list(candidate.tags),
+        payload=payload,
+    )
