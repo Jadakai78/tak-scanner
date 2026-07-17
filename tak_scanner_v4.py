@@ -66,7 +66,7 @@ class TakScannerV4:
 
         for regime, engine_names in REGIME_ENGINES.items():
             for engine_name in engine_names:
-                engine_cls = .get(engine_name)
+                engine_cls = ENGINE_CLASSES.get(engine_name)
                 if engine_cls is None:
                     continue
                 engine_instance = engine_cls()
