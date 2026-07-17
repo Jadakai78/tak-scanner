@@ -5,7 +5,7 @@ from typing import Any, Dict, List, Optional
 
 from convictionscorer import ConvictionScorer
 from microstructure import enrich as micro_enrich
-from phasepath import applyphasepath
+from phasepath import apply_phasepath
 from strategies import ENGINECLASSES, REGIMEENGINES, S8MTFConfluence, scoredeltacontext
 
 from scannermodels import PairContext, SpecialistObservation
