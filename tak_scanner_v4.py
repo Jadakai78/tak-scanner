@@ -106,7 +106,7 @@ class TakScannerV4:
             "V4 ITEM KEYS pair=%s keys=%s",
             pair,
             sorted(item.keys()),
-        )
+    )
 
         df = self._item_to_df(item)
 
