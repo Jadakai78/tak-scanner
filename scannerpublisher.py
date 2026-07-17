@@ -1,76 +1,65 @@
 from __future__ import annotations
 
-from typing import List
+import json
+import logging
+from pathlib import Path
+from typing import Any
 
-from scannermodels import CandidateSignal, CouncilResult, PublishedSignal, ScanResult
+import requests
+
+from scannermodels import ScanResult
+from signalbusschema import build_signal_bus_payload
+
+
+logger = logging.getLogger("scannerpublisher")
 
 
 class ScannerPublisher:
-    def __init__(self) -> None:
-        ...
+    """
+    Simple V4 publisher:
+    - build one signal bus payload from ScanResult
+    - write to app/signalbus.json
+    - push to worker
+    - return the original ScanResult unchanged
+    """
 
-    def _build_published(self, candidate: CandidateSignal, council: CouncilResult) -> PublishedSignal:
-        bucket = council.route
-        warnings: List[str] = list(candidate.warnings)
+    def __init__(
+        self,
+        app_dir: Path,
+        worker_url: str,
+        worker_secret: str,
+    ) -> None:
+        self.app_dir = app_dir
+        self.worker_url = worker_url
+        self.worker_secret = worker_secret
 
-        if candidate.review and candidate.review.caution_flags:
-            warnings.extend(candidate.review.caution_flags)
+        self.bus_path = self.app_dir / "signalbus.json"
 
-        tags = list(candidate.tags)
+    def publish(self, result: ScanResult) -> ScanResult:
+        payload_dict = build_signal_bus_payload(result)
 
-        payload = {
-            "candidate_id": candidate.candidate_id,
-            "pair": candidate.pair,
-            "setup_type": candidate.setup_type,
-            "side": candidate.side,
-            "specialist": candidate.specialist,
-            "score": candidate.review.adjusted_score if candidate.review else candidate.score,
-            "confidence": candidate.confidence,
-            "entry_idea": candidate.entry_idea,
-            "stop_idea": candidate.stop_idea,
-            "target_idea": candidate.target_idea,
-            "evidence": candidate.evidence,
-            "context": candidate.context,
-            "council_decision": council.decision,
-            "battlefield_ok": council.battlefield_ok,
-            "veto_reasons": council.veto_reasons,
-        }
+        try:
+            text = json.dumps(payload_dict, ensure_ascii=False, indent=2)
+            self.bus_path.write_text(text, encoding="utf-8")
+            logger.info(
+                "BUS WRITE OK live=%d caution=%d killed=%d",
+                len(result.live_signals),
+                len(result.caution_signals),
+                len(result.killed_signals),
+            )
+        except Exception as exc:
+            logger.warning("BUS WRITE FAILED err=%s", exc)
 
-        return PublishedSignal(
-            bucket=bucket,
-            pair=candidate.pair,
-            candidate_id=candidate.candidate_id,
-            setup_type=candidate.setup_type,
-            side=candidate.side,
-            score=payload["score"],
-            specialist=candidate.specialist,
-            thesis=candidate.thesis,
-            route=council.route,
-            execution_ready=council.execution_ready,
-            warnings=warnings,
-            tags=tags,
-            payload=payload,
-        )
-
-    def publish(self, candidates: List[CandidateSignal]) -> ScanResult:
-        result = ScanResult()
-
-        for candidate in candidates:
-            if candidate.council is None:
-                continue
-
-            published = self._build_published(candidate, candidate.council)
-
-            if published.bucket == "live_signals":
-                result.live_signals.append(published)
-            elif published.bucket == "caution_signals":
-                result.caution_signals.append(published)
-            elif published.bucket == "killed_signals":
-                result.killed_signals.append(published)
-
-        result.audit["total_candidates"] = len(candidates)
-        result.audit["live_count"] = len(result.live_signals)
-        result.audit["caution_count"] = len(result.caution_signals)
-        result.audit["killed_count"] = len(result.killed_signals)
+        try:
+            data = self.bus_path.read_text(encoding="utf-8")
+            headers = {
+                "Content-Type": "application/json",
+                "X-JHL-Secret": self.worker_secret,
+            }
+            resp = requests.post(self.worker_url, data=data, headers=headers, timeout=20)
+            resp.raise_for_status()
+            logger.info("Worker push OK status=%s", resp.status_code)
+        except Exception as exc:
+            logger.warning("Worker push failed err=%s", exc)
 
         return result
