@@ -1,6 +1,19 @@
 from __future__ import annotations
 
-from typing import Iterable, List
+import json
+import logging
+import time
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+from typing import Any, Dict, Iterable, List, Optional
+
+import pandas as pd
+import requests
+
+from aisupertrend import AISupertrend
+from pairuniverse import PairUniverse
+from regimeclassifier import RegimeClassifier
+from strategies import ENGINE_CLASSES
 
 from scannerorchestrator import ScannerOrchestrator
 from scannerspecialist_registry import SpecialistRegistry
@@ -8,108 +21,270 @@ from scannerreviewer_remi import RemiReviewer
 from scannercouncil import ScannerCouncil
 from scannerpublisher import ScannerPublisher
 from signalbusbus_writer import SignalBusWriter
-from scannermodels import SpecialistObservation
+from scannermodels import PairContext, SpecialistObservation
 
-from s6_reversal import S6Reversal
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s | %(name)s | %(levelname)s | %(message)s",
+)
+
+logger = logging.getLogger("tak_scanner_v4")
+
+FG_URL = "https://api.alternative.me/fng/?limit=1"
+OHL_COLUMNS = ["time", "open", "high", "low", "close", "vwap", "volume", "count"]
 
 
-class S6Adapter:
-    """
-    Adapter that converts legacy S6Reversal.generate(...) output
-    into a SpecialistObservation for v4.
-    """
-
+class V4PairIntake:
     def __init__(self) -> None:
-        self.engine = S6Reversal()
+        self.universe = PairUniverse()
+        self.regime = RegimeClassifier()
+        self.aist = AISupertrend()
 
-    def generate(self, context) -> List[SpecialistObservation]:
-        pair = context.pair
+    def fetch_fg(self) -> Dict[str, Any]:
+        try:
+            resp = self.universe.session.get(FG_URL, timeout=10)
+            resp.raise_for_status()
+            d = resp.json()["data"][0]
+            return {"score": int(d["value"]), "label": d["value_classification"]}
+        except Exception as exc:
+            logger.warning("FG fetch failed (%s); using neutral 50.", exc)
+            return {"score": 50, "label": "Neutral"}
 
-        if "ohlc_df" not in context.metadata:
+    @staticmethod
+    def df_from_universe_item(item: Dict[str, Any]) -> Optional[pd.DataFrame]:
+        raw = item.get("ohlc_4h")
+        if not raw:
+            return None
+        try:
+            df = pd.DataFrame(raw, columns=OHL_COLUMNS)
+            for col in ["open", "high", "low", "close", "vwap", "volume"]:
+                df[col] = pd.to_numeric(df[col], errors="coerce")
+            return df.dropna().reset_index(drop=True)
+        except (ValueError, KeyError):
+            return None
+
+    def build_contexts(self, pairs: Iterable[str]) -> List[PairContext]:
+        fg = self.fetch_fg()
+        fg_score = int(fg["score"])
+
+        active = self.universe.get_active_pairs(interval=240, limit=None)
+        wanted = {str(p).upper() for p in pairs}
+        contexts: List[PairContext] = []
+
+        for item in active:
+            pair = str(item["pair"]).upper()
+            if pair not in wanted:
+                continue
+
+            df = self.df_from_universe_item(item)
+            logger.info(
+                "V4 DF | pair=%s df_none=%s rows=%s",
+                pair,
+                df is None,
+                None if df is None else len(df),
+            )
+            if df is None or len(df) < 60:
+                continue
+
+            regime = self.regime.classify(pair, df, fg_score)
+            logger.info("V4 REGIME | pair=%s regime=%s", pair, regime)
+            if regime == "DEAD":
+                continue
+
+            aist = self.aist.compute(pair, df)
+
+            contexts.append(
+                PairContext(
+                    pair=pair,
+                    timeframe="4h",
+                    last_price=float(df["close"].iloc[-1]),
+                    market_regime=regime,
+                    metadata={
+                        "ohlc_df": df,
+                        "regime": regime,
+                        "fg_score": fg_score,
+                        "aist": aist,
+                        "pairkey": item.get("pairkey"),
+                        "atrpct": item.get("atrpct", 0.0),
+                        "volumeratio": item.get("volumeratio", 1.0),
+                    },
+                )
+            )
+
+        return contexts
+
+
+class LegacyEngineAdapter:
+    def __init__(self, engine_id: str) -> None:
+        self.engine_id = engine_id
+        self.engine_cls = ENGINE_CLASSES.get(engine_id)
+
+    def generate(self, context: PairContext) -> List[SpecialistObservation]:
+        if self.engine_cls is None:
             return []
 
-        ohlc_df = context.metadata.get("ohlc_df")
-        regime = str(context.metadata.get("regime", "RANGE"))
+        df = context.metadata.get("ohlc_df")
+        regime = str(context.metadata.get("regime", context.market_regime))
         fg_score = int(context.metadata.get("fg_score", 50))
-        aist = context.metadata.get("aist")
+        aist = context.metadata.get("aist", {})
 
-        raw = self.engine.generate(
-            pair=pair,
-            ohlc_df=ohlc_df,
-            regime=regime,
-            fg_score=fg_score,
-            aist=aist,
+        try:
+            raw = self.engine_cls().generate(
+                context.pair,
+                df,
+                regime,
+                fg_score,
+                aist=aist,
+            )
+        except Exception as exc:
+            logger.warning("V4 engine %s failed on %s: %s", self.engine_id, context.pair, exc)
+            return []
+
+        logger.info(
+            "V4 TAK | pair=%s engine=%s raw_none=%s",
+            context.pair,
+            self.engine_id,
+            raw is None,
         )
 
         if not raw:
             return []
 
-        bias = str(raw.get("bias", "NEUTRAL")).upper()
-        side = "LONG" if bias == "LONG" else "SHORT"
+        bias = str(raw.get("bias", "")).upper()
+        if bias not in {"LONG", "SHORT"}:
+            return []
 
-        rr = float(raw.get("rr", 0.0))
-        confidence = min(max(rr / 3.0, 0.0), 1.0)
-        score = max(0.0, min(100.0, rr * 30.0 + confidence * 10.0))
+        rr = float(raw.get("rr", 0.0) or 0.0)
+        structure_quality = float(raw.get("structurequality", 0.5) or 0.5)
+        vol_ratio = float(raw.get("volumeratio", context.metadata.get("volumeratio", 1.0)) or 1.0)
 
-        pattern = raw.get("extra", {}).get("pattern", "reversal")
+        confidence = max(0.0, min(1.0, (rr * 0.22) + (structure_quality * 0.45) + min(vol_ratio, 2.0) * 0.10))
+        score = max(0.0, min(100.0, rr * 25.0 + structure_quality * 35.0 + min(vol_ratio, 2.0) * 10.0 + confidence * 15.0))
+
+        thesis = (
+            f"{self.engine_id} produced a {bias} setup on {context.pair} "
+            f"in regime {regime} with rr={rr:.2f}."
+        )
 
         obs = SpecialistObservation(
-            specialist="S6",
-            pair=pair,
-            setup_type=f"s6_{pattern}",
-            side=side,
-            confidence=confidence,
-            score=score,
-            thesis=f"S6 reversal setup detected for {pair} ({pattern}).",
+            specialist=self.engine_id,
+            pair=context.pair,
+            setup_type=str(raw.get("engine", self.engine_id)).lower(),
+            side=bias,
+            confidence=round(confidence, 4),
+            score=round(score, 2),
+            thesis=thesis,
             evidence={
                 "entry_idea": raw.get("entry"),
                 "stop_idea": raw.get("sl"),
                 "target_idea": raw.get("tp"),
                 "rr": raw.get("rr"),
-                "fg_score": raw.get("fg_score"),
+                "structurequality": raw.get("structurequality"),
+                "volumeratio": raw.get("volumeratio"),
+                "fg_score": fg_score,
+                "aistdirection": raw.get("aistdirection", aist.get("direction")),
+                "aiststrength": raw.get("aiststrength", aist.get("signalstrength")),
                 "kill_condition": raw.get("kill_condition"),
                 "raw_signal": raw,
             },
             warnings=[],
-            tags=["s6", "reversal", pattern, str(regime).lower()],
+            tags=[
+                self.engine_id.lower(),
+                regime.lower(),
+                str(raw.get("engine", self.engine_id)).lower(),
+            ],
             context={
                 "regime": regime,
                 "fg_score": fg_score,
+                "pairkey": context.metadata.get("pairkey"),
+                "atrpct": context.metadata.get("atrpct"),
             },
         )
         return [obs]
 
 
-def register_core_specialists(registry: SpecialistRegistry) -> None:
-    s6 = S6Adapter()
-    registry.register("S6", s6.generate)
+class V4Scanner:
+    def __init__(self) -> None:
+        self.intake = V4PairIntake()
+
+    def build_registry(self) -> SpecialistRegistry:
+        registry = SpecialistRegistry()
+        registry.register("S6", LegacyEngineAdapter("S6").generate)
+        return registry
+
+    def run_scan(self, pairs: Iterable[str]) -> Dict[str, Any]:
+        start = time.time()
+
+        registry = self.build_registry()
+        reviewer = RemiReviewer()
+        council = ScannerCouncil()
+        publisher = ScannerPublisher()
+        orchestrator = ScannerOrchestrator(
+            registry=registry,
+            reviewer=reviewer,
+            council=council,
+            publisher=publisher,
+        )
+
+        contexts = self.intake.build_contexts(pairs)
+        all_candidates = []
+
+        for context in contexts:
+            all_candidates.extend(orchestrator._build_candidates_for_pair(context))
+
+        scan_result = publisher.publish(all_candidates)
+        scan_result.audit["pairs_scanned"] = [ctx.pair for ctx in contexts]
+        scan_result.audit["specialists"] = registry.list_specialists()
+        scan_result.audit["scan_duration_sec"] = round(time.time() - start, 2)
+
+        writer = SignalBusWriter("/app/signal_bus.json")
+        payload = writer.write(scan_result)
+
+        try:
+            worker_url = "https://jhl-signal-bus.blazing0478.workers.dev/update"
+            resp = requests.post(
+                worker_url,
+                data=json.dumps(payload, ensure_ascii=False, indent=2),
+                headers={
+                    "Content-Type": "application/json",
+                    "X-JHL-Secret": "jhl2026dragon",
+                },
+                timeout=20,
+            )
+            resp.raise_for_status()
+            logger.info("V4 Worker push OK: %s", resp.status_code)
+        except Exception as exc:
+            logger.warning("V4 Worker push failed: %s", exc)
+
+        logger.info(
+            "V4 scan complete: live=%d caution=%d killed=%d in %.1fs",
+            len(scan_result.live_signals),
+            len(scan_result.caution_signals),
+            len(scan_result.killed_signals),
+            scan_result.audit["scan_duration_sec"],
+        )
+
+        return {
+            "live": len(scan_result.live_signals),
+            "caution": len(scan_result.caution_signals),
+            "killed": len(scan_result.killed_signals),
+            "scan_duration_sec": scan_result.audit["scan_duration_sec"],
+        }
 
 
-def run_v4_scan(pairs: Iterable[str]) -> None:
-    registry = SpecialistRegistry()
-    register_core_specialists(registry)
-
-    reviewer = RemiReviewer()
-    council = ScannerCouncil()
-    publisher = ScannerPublisher()
-    orchestrator = ScannerOrchestrator(
-        registry=registry,
-        reviewer=reviewer,
-        council=council,
-        publisher=publisher,
-    )
-    writer = SignalBusWriter()
-
-    scan_result = orchestrator.run_scan(pairs)
-    writer.write(scan_result)
-
-
-def run_single_pair(pair: str) -> None:
-    run_v4_scan([pair])
+def run_v4_scan(pairs: Iterable[str]) -> Dict[str, Any]:
+    scanner = V4Scanner()
+    return scanner.run_scan(pairs)
 
 
 if __name__ == "__main__":
     import sys
 
-    cli_pairs: List[str] = sys.argv[1:] or ["ADAUSD"]
-    run_v4_scan(cli_pairs)
+    cli_pairs: List[str] = [p.upper() for p in (sys.argv[1:] or ["ADAUSD"])]
+    results = run_v4_scan(cli_pairs)
+    print(
+        f"V4 complete: {results['live']} live, "
+        f"{results['caution']} caution, "
+        f"{results['killed']} killed "
+        f"({results['scan_duration_sec']}s)"
+    )
