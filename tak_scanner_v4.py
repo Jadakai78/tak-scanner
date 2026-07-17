@@ -139,7 +139,7 @@ class TakScannerV4:
 
         logger.info("V4 scan start fg=%s label=%s", fgscore, fg.get("label"))
 
-        active_pairs = self.universe.getactivepairs(interval=240, limit=self.maxpairs)
+        active_pairs = self.universe.get_active_pairs(interval=240, limit=self.maxpairs)
         enriched_pairs = self._enrich_active_pairs(active_pairs, fgscore)
         contexts = self.intake.build_contexts(enriched_pairs, timeframe="4h", max_pairs=self.maxpairs)
 
