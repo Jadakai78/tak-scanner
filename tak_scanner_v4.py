@@ -14,15 +14,17 @@ from engines import ENGINE_CLASSES
 def register_core_specialists(registry: SpecialistRegistry) -> None:
     """
     Hook point for engine specialists.
-    Example:
 
-        from engines import ENGINE_CLASSES
-        registry.register("S6", ENGINE_CLASSES["S6"]().generate)
-
-    For now this stays empty until you plug in your engines.
+    S6 integration:
+      - Uses ENGINE_CLASSES['S6']().generate as the specialist function.
+      - generate(context: PairContext) must return a list of SpecialistObservation.
     """
-    # TODO: plug in S6 and others here when ready.
-    # registry.register("S6", ENGINE_CLASSES["S6"]().generate)
+    s6_engine = ENGINE_CLASSES["S6"]()
+    registry.register("S6", s6_engine.generate)
+
+    # When you’re ready, you can register others in the same pattern:
+    # s7_engine = ENGINE_CLASSES["S7"]()
+    # registry.register("S7", s7_engine.generate)
     ...
 
 
