@@ -12,7 +12,7 @@ import requests
 from aisupertrend import AISupertrend
 from pairuniverse import PairUniverse
 from regimeclassifier import RegimeClassifier
-from strategies import ENGINECLASSES, REGIMEENGINES
+from strategies import ENGINE_CLASSES, REGIME_ENGINES
 
 from engineadapter_v4 import EngineSpecialistAdapter
 from scannerorchestrator import ScannerOrchestrator
@@ -22,6 +22,7 @@ from scannerspecialist_registry import SpecialistRegistry
 from signalbusbus_writer import SignalBusWriter
 from signalbusworker_push import SignalBusWorkerPush
 from specialists_s6 import S6FallbackSpecialist
+
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
 logger = logging.getLogger("takscannerv4")
