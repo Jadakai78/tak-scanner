@@ -46,21 +46,25 @@ class ScannerPublisher:
         merged_context = self._build_context(candidate)
         payload = self._build_payload(candidate, merged_context)
 
-        return PublishedSignal(
-            bucket=route,
-            pair=candidate.pair,
-            candidate_id=candidate.candidate_id,
-            setup_type=candidate.setup_type,
-            side=candidate.side,
-            score=round(float(adjusted_score), 2),
-            specialist=candidate.specialist,
-            thesis=candidate.thesis,
-            route=route,
-            execution_ready=execution_ready,
-            warnings=list(candidate.warnings),
-            tags=list(candidate.tags),
-            payload=payload,
-        )
+    return PublishedSignal(
+        bucket=route,
+        pair=candidate.pair,
+        candidate_id=candidate.candidate_id,
+        setup_type=candidate.setup_type,
+        side=candidate.side,
+        score=round(float(adjusted_score), 2),
+        specialist=candidate.specialist,
+        thesis=candidate.thesis,
+        route=route,
+        execution_ready=execution_ready,
+        confidence=candidate.confidence,
+        final_status=candidate.final_status,
+        warnings=list(candidate.warnings),
+        tags=list(candidate.tags),
+        payload=payload,
+        review=review,
+        council=council,
+    )
 
     def _build_payload(
         self,
