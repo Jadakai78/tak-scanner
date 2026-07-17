@@ -547,39 +547,39 @@ class TakScannerV3:
                             "gimba_message": enriched.get("gimba_message"),
                         }
                     )
-elif in_prop and btc_safe and enriched.get("grade") in {"S", "A", "B"}:
-    logger.info(
-        "APRIL | pair=%s engine=%s route=APPEND prop=%s btcsafe=%s grade=%s intent=%s",
-        pair,
-        engine_id,
-        in_prop,
-        btc_safe,
-        enriched.get("grade"),
-        enriched.get("intent"),
-    )
-    signals.append(enriched)
-elif enriched.get("grade") in {"S", "A", "B"}:
-    logger.info(
-        "APRIL | pair=%s engine=%s route=SHADOW prop=%s btcsafe=%s grade=%s intent=%s remi=%s",
-        pair,
-        engine_id,
-        in_prop,
-        btc_safe,
-        enriched.get("grade"),
-        enriched.get("intent"),
-        enriched.get("remistatus"),
-    )
-else:
-    logger.info(
-        "APRIL | pair=%s engine=%s route=SUPPRESS prop=%s btcsafe=%s grade=%s intent=%s remi=%s",
-        pair,
-        engine_id,
-        in_prop,
-        btc_safe,
-        enriched.get("grade"),
-        enriched.get("intent"),
-        enriched.get("remistatus"),
-    )
+                elif in_prop and btc_safe and enriched.get("grade") in {"S", "A", "B"}:
+                    logger.info(
+                        "APRIL | pair=%s engine=%s route=APPEND prop=%s btcsafe=%s grade=%s intent=%s",
+                        pair,
+                        engine_id,
+                        in_prop,
+                        btc_safe,
+                        enriched.get("grade"),
+                        enriched.get("intent"),
+                    )
+                    signals.append(enriched)
+                elif enriched.get("grade") in {"S", "A", "B"}:
+                    logger.info(
+                        "APRIL | pair=%s engine=%s route=SHADOW prop=%s btcsafe=%s grade=%s intent=%s remi=%s",
+                        pair,
+                        engine_id,
+                        in_prop,
+                        btc_safe,
+                        enriched.get("grade"),
+                        enriched.get("intent"),
+                        enriched.get("remistatus"),
+                    )
+                else:
+                    logger.info(
+                        "APRIL | pair=%s engine=%s route=SUPPRESS prop=%s btcsafe=%s grade=%s intent=%s remi=%s",
+                        pair,
+                        engine_id,
+                        in_prop,
+                        btc_safe,
+                        enriched.get("grade"),
+                        enriched.get("intent"),
+                        enriched.get("remistatus"),
+                    )
 
         signals.sort(
             key=lambda sig: (
