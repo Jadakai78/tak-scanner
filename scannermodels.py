@@ -8,6 +8,34 @@ JsonDict = Dict[str, Any]
 
 
 @dataclass
+class PairContext:
+    pair: str
+    market_regime: str
+    timeframe: str = "1h"
+    fear_greed: Optional[float] = None
+    session: Optional[str] = None
+    context: JsonDict = field(default_factory=dict)
+    indicators: JsonDict = field(default_factory=dict)
+    market_state: JsonDict = field(default_factory=dict)
+    diagnostics: JsonDict = field(default_factory=dict)
+
+
+@dataclass
+class SpecialistObservation:
+    specialist: str
+    pair: str
+    setup_type: str
+    side: str
+    confidence: float
+    score: float
+    thesis: str
+    evidence: JsonDict = field(default_factory=dict)
+    warnings: List[str] = field(default_factory=list)
+    tags: List[str] = field(default_factory=list)
+    context: JsonDict = field(default_factory=dict)
+
+
+@dataclass
 class ReviewResult:
     decision: str = "hold"
     adjusted_score: float = 0.0
@@ -154,7 +182,7 @@ class CandidateSignal:
     thesis: str
     score: float
 
-    confidence: Optional[float] = None
+    confidence: Optional[float] = 0.0
     final_status: str = "candidate"
 
     entry_idea: Optional[float] = None
