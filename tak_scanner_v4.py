@@ -8,25 +8,18 @@ from scannerreviewer_remi import RemiReviewer
 from scannercouncil import ScannerCouncil
 from scannerpublisher import ScannerPublisher
 from signalbusbus_writer import SignalBusWriter
-from engines import ENGINE_CLASSES
 
 
 def register_core_specialists(registry: SpecialistRegistry) -> None:
     """
     Hook point for engine specialists.
-
-    S6 integration:
-      - Uses ENGINE_CLASSES['S6']().generate as the specialist function.
-      - generate(context: PairContext) must return a list of SpecialistObservation.
+    Put the real import here once we confirm the exact module path.
     """
-    s6_engine = ENGINE_CLASSES["S6"]()
-    registry.register("S6", s6_engine.generate)
-
-    # When you’re ready, you can register others in the same pattern:
-    # s7_engine = ENGINE_CLASSES["S7"]()
-    # registry.register("S7", s7_engine.generate)
+    # Example only:
+    # from your_actual_module import ENGINE_CLASSES
+    # s6_engine = ENGINE_CLASSES["S6"]()
+    # registry.register("S6", s6_engine.generate)
     ...
-
 
 def run_v4_scan(pairs: Iterable[str]) -> None:
     """
