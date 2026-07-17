@@ -16,7 +16,8 @@ from regimeclassifier import RegimeClassifier
 from strategies import ENGINE_CLASSES
 
 from scannerorchestrator import ScannerOrchestrator
-from scannerspecialist_registry import ScannerSpecialistRegistry
+from scannerspecialist_registry import ScannerSpecialistRegistry 
+as SpecialistRegistry
 from scannerreviewer_remi import RemiReviewer
 from scannercouncil import ScannerCouncil
 from scannerpublisher import ScannerPublisher
