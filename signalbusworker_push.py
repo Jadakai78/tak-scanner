@@ -1,58 +1,41 @@
 from __future__ import annotations
 
-import logging
-from pathlib import Path
-from typing import Optional
+import json
+from typing import Any, Dict, Optional
 
 import requests
-
-logger = logging.getLogger("signalbusworkerpush")
 
 
 class SignalBusWorkerPush:
     def __init__(
         self,
-        worker_url: str = "https://jhl-signal-bus.blazing-0478.workers.dev/update",
-        secret: str = "jhl2026dragon",
+        worker_url: str,
+        secret: Optional[str] = None,
         timeout: int = 20,
     ) -> None:
         self.worker_url = worker_url
         self.secret = secret
         self.timeout = timeout
 
-    def push_file(self, bus_path: Path) -> bool:
-        try:
-            payload = bus_path.read_text(encoding="utf-8")
-            resp = requests.post(
-                self.worker_url,
-                data=payload,
-                headers={
-                    "Content-Type": "application/json",
-                    "X-JHL-Secret": self.secret,
-                },
-                timeout=self.timeout,
-            )
-            resp.raise_for_status()
-            logger.info("V4 WORKER PUSH OK status=%s", resp.status_code)
-            return True
-        except Exception as exc:
-            logger.warning("V4 WORKER PUSH FAIL err=%s", exc)
-            return False
+    def push(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        headers = {"Content-Type": "application/json"}
+        if self.secret:
+            headers["X-JHL-Secret"] = self.secret
 
-    def push_payload_text(self, payload_text: str) -> bool:
+        response = requests.post(
+            self.worker_url,
+            data=json.dumps(payload),
+            headers=headers,
+            timeout=self.timeout,
+        )
+        response.raise_for_status()
+
         try:
-            resp = requests.post(
-                self.worker_url,
-                data=payload_text,
-                headers={
-                    "Content-Type": "application/json",
-                    "X-JHL-Secret": self.secret,
-                },
-                timeout=self.timeout,
-            )
-            resp.raise_for_status()
-            logger.info("V4 WORKER PUSH OK status=%s", resp.status_code)
-            return True
-        except Exception as exc:
-            logger.warning("V4 WORKER PUSH FAIL err=%s", exc)
-            return False
+            body = response.json()
+        except ValueError:
+            body = {"text": response.text}
+
+        return {
+            "status_code": response.status_code,
+            "body": body,
+        }
