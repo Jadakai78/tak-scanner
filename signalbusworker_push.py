@@ -1,81 +1,55 @@
 from __future__ import annotations
 
-from typing import Any, Dict, Iterable, List, Optional
+import logging
+from pathlib import Path
+from typing import Optional
 
-import pandas as pd
-
-from pairuniverse import PairUniverse
-from regimeclassifier import RegimeClassifier
-
-
-OHLC_COLUMNS = ["time", "open", "high", "low", "close", "vwap", "volume", "count"]
+import requests
 
 
-class ScannerPairIntake:
+logger = logging.getLogger("signalbusworkerpush")
+
+DEFAULT_WORKER_URL = "https://jhl-signal-bus.blazing-0478.workers.dev/update"
+DEFAULT_SECRET = "jhl2026dragon"
+DEFAULT_BUS_PATH = Path("app/signalbus.json")
+
+
+class SignalBusWorkerPush:
     def __init__(
         self,
-        universe: Optional[PairUniverse] = None,
-        regime_classifier: Optional[RegimeClassifier] = None,
-        max_pairs: Optional[int] = None,
-        interval: int = 240,
-        min_rows: int = 60,
+        worker_url: str = DEFAULT_WORKER_URL,
+        secret: str = DEFAULT_SECRET,
+        bus_path: Path | str = DEFAULT_BUS_PATH,
+        timeout: int = 20,
     ) -> None:
-        self.universe = universe or PairUniverse()
-        self.regime_classifier = regime_classifier or RegimeClassifier()
-        self.max_pairs = max_pairs
-        self.interval = interval
-        self.min_rows = min_rows
+        self.worker_url = worker_url
+        self.secret = secret
+        self.bus_path = Path(bus_path)
+        self.timeout = timeout
 
-    def fetch_active_pairs(self) -> List[Dict[str, Any]]:
-        return list(
-            self.universe.get_active_pairs(
-                interval=self.interval,
-                limit=self.max_pairs,
-            )
+    def push_text(self, payload_text: str) -> requests.Response:
+        response = requests.post(
+            self.worker_url,
+            data=payload_text,
+            headers={
+                "Content-Type": "application/json",
+                "X-JHL-Secret": self.secret,
+            },
+            timeout=self.timeout,
         )
+        response.raise_for_status()
+        return response
 
-    def df_from_universe_item(self, item: Dict[str, Any]) -> Optional[pd.DataFrame]:
-        raw = item.get("ohlc4h")
-        if not raw:
-            return None
+    def push_file(self, bus_path: Optional[Path | str] = None) -> requests.Response:
+        target = Path(bus_path) if bus_path is not None else self.bus_path
+        payload_text = target.read_text(encoding="utf-8")
+        return self.push_text(payload_text)
 
+    def safe_push_file(self, bus_path: Optional[Path | str] = None) -> bool:
         try:
-            df = pd.DataFrame(raw, columns=OHLC_COLUMNS)
-        except Exception:
-            return None
-
-        required = ["open", "high", "low", "close", "vwap", "volume"]
-        for col in required:
-            df[col] = pd.to_numeric(df[col], errors="coerce")
-
-        df = df.dropna().reset_index(drop=True)
-        if len(df) < self.min_rows:
-            return None
-        return df
-
-    def build_pair_records(self) -> List[Dict[str, Any]]:
-        records: List[Dict[str, Any]] = []
-
-        for item in self.fetch_active_pairs():
-            pair = str(item.get("pair", "UNKNOWN"))
-            df = self.df_from_universe_item(item)
-            if df is None:
-                continue
-
-            regime = self.regime_classifier.classify(
-                pair=pair,
-                df=df,
-                fg_score=int(item.get("fg_score", 50)),
-            )
-
-            records.append(
-                {
-                    "pair": pair,
-                    "pair_key": item.get("pair_key"),
-                    "regime": regime,
-                    "dataframe": df,
-                    "source": item,
-                }
-            )
-
-        return records
+            response = self.push_file(bus_path=bus_path)
+            logger.info("Worker push OK status=%s", response.status_code)
+            return True
+        except Exception as exc:
+            logger.warning("Worker push failed: %s", exc)
+            return False
