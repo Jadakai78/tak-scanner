@@ -7,6 +7,14 @@ from scannercandidate_factory import build_candidate
 from scannercouncil import ScannerCouncil
 from scannermodels import PublishedSignal, ScanResult
 from scannerreviewer_remi import RemiReviewer
+from pathlib import Path
+from scannerpublisher import ScannerPublisher
+
+publisher = ScannerPublisher(
+    app_dir=Path("app"),
+    worker_url="https://jhl-signal-bus.blazing0478.workers.dev/update",
+    worker_secret="jhl2026dragon",
+)
 
 
 logger = logging.getLogger("scannerorchestrator")
