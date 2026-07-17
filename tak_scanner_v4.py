@@ -37,7 +37,7 @@ class TakScannerV4:
     def __init__(
         self,
         maxpairs: Optional[int] = None,
-        worker_url: str = "https://jhl-signal-bus.blazing-0478.workers.dev/update",
+        worker_url: str = "https://jhl-signal-bus.blazing0478.workers.dev/update",
         worker_secret: Optional[str] = "jhl2026dragon",
     ) -> None:
         self.maxpairs = maxpairs
