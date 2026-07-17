@@ -1,81 +1,72 @@
 from __future__ import annotations
 
+import logging
 from typing import Any, Dict, Iterable, List, Optional
 
-import pandas as pd
+from scannermodels import PairContext
 
-from pairuniverse import PairUniverse
-from regimeclassifier import RegimeClassifier
-
-
-OHLC_COLUMNS = ["time", "open", "high", "low", "close", "vwap", "volume", "count"]
+logger = logging.getLogger("scannerpairintake")
 
 
 class ScannerPairIntake:
-    def __init__(
+    def __init__(self, regime_classifier: Any | None = None) -> None:
+        self.regime_classifier = regime_classifier
+
+    def build_contexts(
         self,
-        universe: Optional[PairUniverse] = None,
-        regime_classifier: Optional[RegimeClassifier] = None,
+        active_pairs: Iterable[Dict[str, Any]],
+        timeframe: str = "4h",
         max_pairs: Optional[int] = None,
-        interval: int = 240,
-        min_rows: int = 60,
-    ) -> None:
-        self.universe = universe or PairUniverse()
-        self.regime_classifier = regime_classifier or RegimeClassifier()
-        self.max_pairs = max_pairs
-        self.interval = interval
-        self.min_rows = min_rows
+    ) -> List[PairContext]:
+        contexts: List[PairContext] = []
 
-    def fetch_active_pairs(self) -> List[Dict[str, Any]]:
-        return list(
-            self.universe.get_active_pairs(
-                interval=self.interval,
-                limit=self.max_pairs,
-            )
-        )
-
-    def df_from_universe_item(self, item: Dict[str, Any]) -> Optional[pd.DataFrame]:
-        raw = item.get("ohlc4h")
-        if not raw:
-            return None
-
-        try:
-            df = pd.DataFrame(raw, columns=OHLC_COLUMNS)
-        except Exception:
-            return None
-
-        required = ["open", "high", "low", "close", "vwap", "volume"]
-        for col in required:
-            df[col] = pd.to_numeric(df[col], errors="coerce")
-
-        df = df.dropna().reset_index(drop=True)
-        if len(df) < self.min_rows:
-            return None
-        return df
-
-    def build_pair_records(self) -> List[Dict[str, Any]]:
-        records: List[Dict[str, Any]] = []
-
-        for item in self.fetch_active_pairs():
-            pair = str(item.get("pair", "UNKNOWN"))
-            df = self.df_from_universe_item(item)
-            if df is None:
+        for item in active_pairs:
+            pair = str(item.get("pair", "")).strip()
+            if not pair:
                 continue
 
-            regime = self.regime_classifier.classify(
-                pair=pair,
-                df=df,
-                fg_score=int(item.get("fg_score", 50)),
+            regime = str(item.get("regime", "")).strip() or self._derive_regime(item)
+            last_price = self._float_or_none(item.get("last_price"))
+            metadata = dict(item)
+
+            contexts.append(
+                PairContext(
+                    pair=pair,
+                    timeframe=str(item.get("timeframe", timeframe)),
+                    last_price=last_price,
+                    market_regime=regime,
+                    metadata=metadata,
+                )
             )
 
-            records.append(
-                {
-                    "pair": pair,
-                    "pair_key": item.get("pair_key"),
-                    "regime": regime,
-                    "dataframe": df,
-                    "source": item,
-                }
-            )
+            if max_pairs is not None and len(contexts) >= max_pairs:
+                break
 
-        return records
+        logger.info(
+            "V4 intake complete contexts=%s contextpairs=%s",
+            len(contexts),
+            ", ".join(ctx.pair for ctx in contexts[:150]),
+        )
+        return contexts
+
+    def _derive_regime(self, item: Dict[str, Any]) -> str:
+        if self.regime_classifier is not None and "df" in item:
+            try:
+                pair = str(item.get("pair", "UNKNOWN"))
+                return str(self.regime_classifier.classify(pair, item["df"], item.get("fgscore", 50)))
+            except Exception:
+                pass
+
+        aist_dir = str(item.get("aist_direction", "")).upper()
+        if aist_dir == "UP":
+            return "TRENDUP"
+        if aist_dir == "DOWN":
+            return "TRENDDOWN"
+        return str(item.get("market_regime", "unknown"))
+
+    @staticmethod
+    def _float_or_none(value: Any) -> float | None:
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return None
