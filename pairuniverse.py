@@ -329,7 +329,7 @@ class PairUniverse:
         }
 
 
-def get_active_pairs(...):
+    def get_active_pairs(...):
        ...
        ranked.sort(key=lambda d: d.get(sort_by, 0.0), reverse=True)
        if limit is not None:
