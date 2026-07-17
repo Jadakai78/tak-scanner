@@ -82,19 +82,19 @@ class TakScannerV4:
 
         return registry
 
-    def _item_to_df(self, item: Dict[str, Any]) -> Any:
-        try:
-            import pandas as pd
+        def _item_to_df(self, item: Dict[str, Any]) -> Any:
+            try:
+                import pandas as pd
 
-            raw = item.get("ohlc_4h")
-            if not raw:
+                raw = item.get("ohlc_4h")
+                if not raw:
+                    return None
+                df = pd.DataFrame(raw, columns=OHLCOLUMNS)
+                for col in ["open", "high", "low", "close", "vwap", "volume"]:
+                    df[col] = pd.to_numeric(df[col], errors="coerce")
+                return df.dropna().reset_index(drop=True)
+            except Exception:
                 return None
-            df = pd.DataFrame(raw, columns=OHLCOLUMNS)
-            for col in ["open", "high", "low", "close", "vwap", "volume"]:
-                df[col] = pd.to_numeric(df[col], errors="coerce")
-            return df.dropna().reset_index(drop=True)
-        except Exception:
-            return None
 
     def _enrich_active_pairs(self, active_pairs: List[Dict[str, Any]], fgscore: int) -> List[Dict[str, Any]]:
         enriched: List[Dict[str, Any]] = []
