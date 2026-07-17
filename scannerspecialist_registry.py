@@ -6,8 +6,22 @@ from typing import Any, Dict, List, Optional
 from convictionscorer import ConvictionScorer
 from microstructure import enrich as micro_enrich
 from phasepath import apply_phasepath
-from strategies import ENGINECLASSES, REGIMEENGINES, S8MTFConfluence, scoredeltacontext
+try:
+    from strategies import ENGINE_CLASSES as ENGINECLASSES
+except ImportError:
+    from strategies import ENGINECLASSES
 
+try:
+    from strategies import REGIME_ENGINES as REGIMEENGINES
+except ImportError:
+    from strategies import REGIMEENGINES
+
+from strategies import S8MTFConfluence
+
+try:
+    from strategies import score_delta_context as scoredeltacontext
+except ImportError:
+    from strategies import scoredeltacontext
 from scannermodels import PairContext, SpecialistObservation
 
 logger = logging.getLogger("scannerspecialistregistry")
