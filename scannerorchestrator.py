@@ -1,174 +1,143 @@
 from __future__ import annotations
 
 import logging
-import time
-from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, List, Optional
-
-import requests
+from typing import Any, Dict, Iterable, List, Optional
 
 from scannercandidate_factory import build_candidate
 from scannercouncil import ScannerCouncil
 from scannerpair_intake import ScannerPairIntake
-from scannerpublisher import ScannerPublisher
 from scannerreviewer_remi import RemiReviewer
+from scannermodels import CandidateSignal, PublishedSignal, ScanResult
 from scannerspecialist_registry import ScannerSpecialistRegistry
-from scannermodels import CandidateSignal, ScanResult
-from signalbusschema import build_signal_bus_payload
-from signalbusbus_writer import SignalBusBusWriter
-from signalbusworker_push import SignalBusWorkerPush
 
-logger = logging.getLogger("scannerorchestrator")
-
-FG_URL = "https://api.alternative.me/fng/?limit=1"
-SCAN_HOURS_UTC = [3, 7, 11, 15, 19, 23]
-SCAN_MINUTE_UTC = 45
+logger = logging.getLogger(__name__)
 
 
 class ScannerOrchestrator:
     def __init__(
         self,
-        max_pairs: Optional[int] = None,
         intake: Optional[ScannerPairIntake] = None,
-        specialists: Optional[ScannerSpecialistRegistry] = None,
+        registry: Optional[ScannerSpecialistRegistry] = None,
         remi: Optional[RemiReviewer] = None,
         council: Optional[ScannerCouncil] = None,
-        publisher: Optional[ScannerPublisher] = None,
-        bus_writer: Optional[SignalBusBusWriter] = None,
-        worker_push: Optional[SignalBusWorkerPush] = None,
     ) -> None:
-        self.max_pairs = max_pairs
         self.intake = intake or ScannerPairIntake()
-        self.specialists = specialists or ScannerSpecialistRegistry()
+        self.registry = registry or ScannerSpecialistRegistry()
         self.remi = remi or RemiReviewer()
         self.council = council or ScannerCouncil()
-        self.publisher = publisher or ScannerPublisher()
-        self.bus_writer = bus_writer or SignalBusBusWriter()
-        self.worker_push = worker_push or SignalBusWorkerPush()
 
-    def fetch_fg(self) -> Dict[str, Any]:
-        try:
-            resp = requests.get(FG_URL, timeout=10)
-            resp.raise_for_status()
-            d = resp.json()["data"][0]
-            return {"score": int(d["value"]), "label": d["value_classification"]}
-        except Exception as exc:
-            logger.warning("V4 FG FAIL err=%s using neutral", exc)
-            return {"score": 50, "label": "Neutral"}
+    def _publishable(self, candidate: CandidateSignal, bucket: str) -> PublishedSignal:
+        reviewed_score = candidate.review.adjusted_score if candidate.review else candidate.score
+        route = candidate.council.route if candidate.council else bucket
+        execution_ready = bool(candidate.council.execution_ready) if candidate.council else False
 
-    @staticmethod
-    def next_scan_time(now: datetime) -> datetime:
-        candidates = []
-        for hour in SCAN_HOURS_UTC:
-            dt = now.replace(hour=hour, minute=SCAN_MINUTE_UTC, second=0, microsecond=0)
-            if dt <= now:
-                dt += timedelta(days=1)
-            candidates.append(dt)
-        return min(candidates)
-
-    def process_candidate(self, candidate: CandidateSignal) -> CandidateSignal:
-        review = self.remi.review(candidate)
-        candidate.review = review
-        candidate.confidence = max(0.0, min(1.0, candidate.confidence + review.confidence_delta))
-        candidate.council = self.council.adjudicate(candidate)
-        candidate.final_status = candidate.council.route
-        logger.info(
-            "V4 COUNCIL pair=%s candidate=%s remi=%s reviewed_score=%s council=%s route=%s",
-            candidate.pair,
-            candidate.candidate_id,
-            review.decision,
-            review.adjusted_score,
-            candidate.council.decision,
-            candidate.council.route,
-        )
-        return candidate
-
-    def run_scan(self) -> Dict[str, Any]:
-        start = time.time()
-        now = datetime.now(timezone.utc)
-        fg = self.fetch_fg()
-
-        logger.info("V4 SCAN START fg_score=%s fg_label=%s", fg["score"], fg["label"])
-
-        active = self.intake.get_active_pairs(interval=240, limit=self.max_pairs)
-
-        result = ScanResult()
-        processed_candidates: List[CandidateSignal] = []
-        regime_map: Dict[str, str] = {}
-
-        prepared_pairs = 0
-        observations_total = 0
-
-        for item in active:
-            prepared = self.intake.prepare_pair(item, fg["score"])
-            if not prepared:
-                continue
-
-            prepared_pairs += 1
-            pair = prepared["pair"]
-            df = prepared["df"]
-            context = prepared["context"]
-            aist = prepared["aist"]
-
-            regime_map[pair] = context.market_regime
-
-            observations = self.specialists.run_specialists(
-                pair=pair,
-                df=df,
-                context=context,
-                source_item=item,
-                aist=aist,
-            )
-            observations_total += len(observations)
-
-            for obs in observations:
-                candidate = build_candidate(obs)
-                processed_candidates.append(self.process_candidate(candidate))
-
-        published = self.publisher.publish_many(processed_candidates)
-
-        for signal in published:
-            if signal.bucket == "live_signals":
-                result.live_signals.append(signal)
-            elif signal.bucket == "caution_signals":
-                result.caution_signals.append(signal)
-            else:
-                result.killed_signals.append(signal)
-
-        result.audit = {
-            "last_scan": now.isoformat(),
-            "next_scan": self.next_scan_time(now).isoformat(),
-            "fg": fg,
-            "active_pairs": len(active),
-            "prepared_pairs": prepared_pairs,
-            "observations_total": observations_total,
-            "candidates_total": len(processed_candidates),
-            "live_total": len(result.live_signals),
-            "caution_total": len(result.caution_signals),
-            "killed_total": len(result.killed_signals),
-            "regime_map": regime_map,
-            "scan_duration_sec": round(time.time() - start, 2),
+        payload: Dict[str, Any] = {
+            "entry_idea": candidate.entry_idea,
+            "stop_idea": candidate.stop_idea,
+            "target_idea": candidate.target_idea,
+            "evidence": dict(candidate.evidence),
+            "context": dict(candidate.context),
+            "review": None if candidate.review is None else {
+                "decision": candidate.review.decision,
+                "adjusted_score": candidate.review.adjusted_score,
+                "confidence_delta": candidate.review.confidence_delta,
+                "rationale": candidate.review.rationale,
+                "caution_flags": list(candidate.review.caution_flags),
+                "evidence_notes": list(candidate.review.evidence_notes),
+            },
+            "council": None if candidate.council is None else {
+                "decision": candidate.council.decision,
+                "battlefield_ok": candidate.council.battlefield_ok,
+                "veto_reasons": list(candidate.council.veto_reasons),
+                "route": candidate.council.route,
+                "execution_ready": candidate.council.execution_ready,
+            },
         }
 
-        logger.info(
-            "V4 SUMMARY active=%s prepared=%s observations=%s candidates=%s live=%s caution=%s killed=%s",
-            len(active),
-            prepared_pairs,
-            observations_total,
-            len(processed_candidates),
-            len(result.live_signals),
-            len(result.caution_signals),
-            len(result.killed_signals),
+        return PublishedSignal(
+            bucket=bucket,
+            pair=candidate.pair,
+            candidate_id=candidate.candidate_id,
+            setup_type=candidate.setup_type,
+            side=candidate.side,
+            score=round(reviewed_score, 2),
+            specialist=candidate.specialist,
+            thesis=candidate.thesis,
+            route=route,
+            execution_ready=execution_ready,
+            warnings=list(candidate.warnings),
+            tags=list(candidate.tags),
+            payload=payload,
         )
 
-        payload = build_signal_bus_payload(result)
-        bus_path = self.bus_writer.write(payload)
-        pushed = self.worker_push.push_file(bus_path)
-        result.audit["worker_push_ok"] = pushed
+    def process_pair(self, pair_payload: Dict[str, Any]) -> List[CandidateSignal]:
+        observations = self.registry.observe_pair(pair_payload)
+        candidates: List[CandidateSignal] = []
+
+        for observation in observations:
+            candidate = build_candidate(observation)
+            candidate.review = self.remi.review(candidate)
+            candidate.council = self.council.adjudicate(candidate)
+
+            if candidate.council.decision == "live":
+                candidate.final_status = "live"
+            elif candidate.council.decision == "caution":
+                candidate.final_status = "caution"
+            else:
+                candidate.final_status = "killed"
+
+            candidates.append(candidate)
 
         logger.info(
-            "V4 SCAN COMPLETE duration=%s worker_push_ok=%s",
-            result.audit["scan_duration_sec"],
-            pushed,
+            "V4 orchestrator pair=%s candidates=%s",
+            pair_payload.get("pair"),
+            len(candidates),
         )
-        return payload
+        return candidates
+
+    def run(self, universe: Iterable[Dict[str, Any]]) -> ScanResult:
+        prepared_pairs = self.intake.prepare(universe)
+
+        live_signals: List[PublishedSignal] = []
+        caution_signals: List[PublishedSignal] = []
+        killed_signals: List[PublishedSignal] = []
+        audit_pairs: List[Dict[str, Any]] = []
+
+        for pair_payload in prepared_pairs:
+            pair = pair_payload.get("pair")
+            regime = pair_payload.get("market_regime")
+            logger.info("V4 orchestrator run pair=%s regime=%s", pair, regime)
+
+            candidates = self.process_pair(pair_payload)
+
+            for candidate in candidates:
+                if candidate.final_status == "live":
+                    live_signals.append(self._publishable(candidate, "live_signals"))
+                elif candidate.final_status == "caution":
+                    caution_signals.append(self._publishable(candidate, "caution_signals"))
+                else:
+                    killed_signals.append(self._publishable(candidate, "killed_signals"))
+
+            audit_pairs.append(
+                {
+                    "pair": pair,
+                    "regime": regime,
+                    "candidate_count": len(candidates),
+                }
+            )
+
+        audit = {
+            "pairs_seen": len(prepared_pairs),
+            "live_count": len(live_signals),
+            "caution_count": len(caution_signals),
+            "killed_count": len(killed_signals),
+            "pairs": audit_pairs,
+        }
+
+        return ScanResult(
+            live_signals=live_signals,
+            caution_signals=caution_signals,
+            killed_signals=killed_signals,
+            positions=[],
+            audit=audit,
+        )
