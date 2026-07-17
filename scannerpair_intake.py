@@ -1,116 +1,92 @@
 from __future__ import annotations
 
-import logging
-from typing import Any, Dict, List, Optional
+from dataclasses import asdict
+from typing import Any, Dict, Iterable, List, Optional
 
-import pandas as pd
-
-from pairuniverse import PairUniverse
-from regimeclassifier import RegimeClassifier
-from aisupertrend import AISupertrend
 from scannermodels import PairContext
-
-logger = logging.getLogger("scannerpairintake")
-
-OHLC_COLUMNS = ["time", "open", "high", "low", "close", "vwap", "volume", "count"]
 
 
 class ScannerPairIntake:
     def __init__(
         self,
-        universe: Optional[PairUniverse] = None,
-        regime_classifier: Optional[RegimeClassifier] = None,
-        ai_supertrend: Optional[AISupertrend] = None,
-        min_rows: int = 60,
+        default_timeframe: str = "1h",
+        minimum_rows: int = 80,
     ) -> None:
-        self.universe = universe or PairUniverse()
-        self.regime_classifier = regime_classifier or RegimeClassifier()
-        self.ai_supertrend = ai_supertrend or AISupertrend()
-        self.min_rows = min_rows
+        self.default_timeframe = default_timeframe
+        self.minimum_rows = minimum_rows
 
-    def get_active_pairs(self, interval: int = 240, limit: Optional[int] = None) -> List[Dict[str, Any]]:
-        active = self.universe.getactivepairs(interval=interval, limit=limit)
-        logger.info("V4 INTAKE active_pairs=%s interval=%s", len(active), interval)
-        return active
+    def normalize_pair_record(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        pair = str(payload.get("pair") or payload.get("symbol") or "").strip().upper()
+        timeframe = str(payload.get("timeframe") or self.default_timeframe)
+        regime = str(payload.get("market_regime") or payload.get("regime") or "unknown")
+        last_price = payload.get("last_price")
 
-    def dataframe_from_item(self, item: Dict[str, Any]) -> Optional[pd.DataFrame]:
-        raw = item.get("ohlc4h")
-        pair = item.get("pair", "UNKNOWN")
+        record = {
+            "pair": pair,
+            "timeframe": timeframe,
+            "market_regime": regime,
+            "last_price": last_price,
+            "ohlc": list(payload.get("ohlc", [])),
+            "volume_ratio": payload.get("volume_ratio"),
+            "atr_pct": payload.get("atr_pct"),
+            "metadata": dict(payload.get("metadata", {})),
+        }
+        return record
 
-        if not raw:
-            logger.info("V4 DF pair=%s dfnone=True rows=0", pair)
-            return None
-
-        try:
-            df = pd.DataFrame(raw, columns=OHLC_COLUMNS)
-            for col in ["open", "high", "low", "close", "vwap", "volume"]:
-                df[col] = pd.to_numeric(df[col], errors="coerce")
-            df = df.dropna().reset_index(drop=True)
-            logger.info("V4 DF pair=%s dfnone=%s rows=%s", pair, False, len(df))
-            return df
-        except Exception as exc:
-            logger.warning("V4 DF FAIL pair=%s err=%s", pair, exc)
-            return None
-
-    def build_context(self, item: Dict[str, Any], df: pd.DataFrame, fg_score: int) -> PairContext:
-        pair = str(item.get("pair", "UNKNOWN"))
-        last_price = None
-        if not df.empty and "close" in df.columns:
-            try:
-                last_price = float(df["close"].iloc[-1])
-            except Exception:
-                last_price = None
-
-        regime = self.regime_classifier.classify(pair, df, fg_score)
-        logger.info("V4 REGIME pair=%s regime=%s", pair, regime)
+    def to_context(self, payload: Dict[str, Any]) -> PairContext:
+        record = self.normalize_pair_record(payload)
+        metadata = dict(record.get("metadata", {}))
+        metadata["ohlc_rows"] = len(record.get("ohlc", []))
+        metadata["volume_ratio"] = record.get("volume_ratio")
+        metadata["atr_pct"] = record.get("atr_pct")
 
         return PairContext(
-            pair=pair,
-            timeframe="4h",
-            last_price=last_price,
-            market_regime=regime,
-            metadata={
-                "pairkey": item.get("pairkey"),
-                "atrpct": item.get("atrpct"),
-                "volumeratio": item.get("volumeratio"),
-                "fg_score": fg_score,
-                "source_item": item,
-            },
+            pair=record["pair"],
+            timeframe=record["timeframe"],
+            last_price=record["last_price"],
+            market_regime=record["market_regime"],
+            metadata=metadata,
         )
 
-    def compute_supertrend(self, pair: str, df: pd.DataFrame) -> Dict[str, Any]:
-        try:
-            result = self.ai_supertrend.compute(pair, df)
-            logger.info(
-                "V4 AIST pair=%s dir=%s strength=%s",
-                pair,
-                result.get("direction"),
-                result.get("signalstrength"),
+    def pair_is_eligible(self, payload: Dict[str, Any]) -> bool:
+        record = self.normalize_pair_record(payload)
+        if not record["pair"]:
+            return False
+        if len(record["ohlc"]) < self.minimum_rows:
+            return False
+        return True
+
+    def prepare(self, universe: Iterable[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        prepared: List[Dict[str, Any]] = []
+
+        for item in universe:
+            record = self.normalize_pair_record(dict(item))
+            if not self.pair_is_eligible(record):
+                continue
+
+            context = self.to_context(record)
+            prepared.append(
+                {
+                    "context": asdict(context),
+                    "pair": record["pair"],
+                    "timeframe": record["timeframe"],
+                    "market_regime": record["market_regime"],
+                    "last_price": record["last_price"],
+                    "ohlc": record["ohlc"],
+                    "volume_ratio": record["volume_ratio"],
+                    "atr_pct": record["atr_pct"],
+                    "metadata": record["metadata"],
+                }
             )
-            return result
-        except Exception as exc:
-            logger.warning("V4 AIST FAIL pair=%s err=%s", pair, exc)
-            return {}
 
-    def prepare_pair(
+        return prepared
+
+    def prepare_from_active_pairs(
         self,
-        item: Dict[str, Any],
-        fg_score: int,
-    ) -> Optional[Dict[str, Any]]:
-        pair = str(item.get("pair", "UNKNOWN"))
-        df = self.dataframe_from_item(item)
-
-        if df is None or len(df) < self.min_rows:
-            logger.info("V4 SKIP pair=%s reason=insufficient_rows", pair)
-            return None
-
-        context = self.build_context(item, df, fg_score)
-        aist = self.compute_supertrend(pair, df)
-
-        return {
-            "pair": pair,
-            "item": item,
-            "df": df,
-            "context": context,
-            "aist": aist,
-        }
+        active_pairs: Iterable[Dict[str, Any]],
+        limit: Optional[int] = None,
+    ) -> List[Dict[str, Any]]:
+        prepared = self.prepare(active_pairs)
+        if limit is not None:
+            return prepared[:limit]
+        return prepared
