@@ -75,15 +75,11 @@ class V4PairIntake:
         active = self.universe.get_active_pairs(interval=240, limit=None)
         logger.info("V4 universe | active_count=%s", len(active))
 
-        wanted = {str(p).upper() for p in pairs}
-        logger.info("V4 requested pairs=%s", sorted(wanted))
-
+        # For now, ignore requested list and scan full active universe (like v3).
         contexts: List[PairContext] = []
 
         for item in active:
             pair = str(item["pair"]).upper()
-            if pair not in wanted:
-                continue
 
             df = self.df_from_universe_item(item)
             logger.info(
