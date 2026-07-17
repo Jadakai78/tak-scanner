@@ -103,6 +103,7 @@ class TakScannerV4:
             pair = item.get("pair")
             df = self._item_to_df(item)
 
+    df = self._item_to_df(item)df = self._item_to_df(item)
             logger.info(
                 "V4 DF pair=%s dfnone=%s rows=%s",
                 pair,
