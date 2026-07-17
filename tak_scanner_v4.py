@@ -99,39 +99,39 @@ class TakScannerV4:
         def _enrich_active_pairs(self, active_pairs: List[Dict[str, Any]], fgscore: int) -> List[Dict[str, Any]]:
             enriched: List[Dict[str, Any]] = []
 
-            for item in active_pairs:
-                pair = item.get("pair")
+    for item in active_pairs:
+        pair = item.get("pair")
 
-                logger.info(
-                    "V4 ITEM KEYS pair=%s keys=%s",
-                    pair,
-                    sorted(item.keys()),
-                )
+        logger.info(
+            "V4 ITEM KEYS pair=%s keys=%s",
+            pair,
+            sorted(item.keys()),
+        )
 
-                df = self._item_to_df(item)
+        df = self._item_to_df(item)
 
-                logger.info(
-                    "V4 DF pair=%s dfnone=%s rows=%s",
-                    pair,
-                    df is None,
-                    None if df is None else len(df),
-                )
+        logger.info(
+            "V4 DF pair=%s dfnone=%s rows=%s",
+            pair,
+            df is None,
+            None if df is None else len(df),
+    )
 
-                if df is None or len(df) < 60:
-                    continue
+    if df is None or len(df) < 60:
+        continue
 
-        regime = self.regime.classify(pair, df, fgscore)
-        logger.info("V4 REGIME pair=%s regime=%s", pair, regime)
+    regime = self.regime.classify(pair, df, fgscore)
+    logger.info("V4 REGIME pair=%s regime=%s", pair, regime)
 
-        if str(regime).upper() == "DEAD":
-            continue
+    if str(regime).upper() == "DEAD":
+        continue
+    regime = self.regime.classify(pair, df, fgscore)
+    logger.info("V4 REGIME pair=%s regime=%s", pair, regime)
 
-            regime = self.regime.classify(pair, df, fgscore)
-            logger.info("V4 REGIME pair=%s regime=%s", pair, regime)
+    if str(regime).upper() == "DEAD":
+        continue
 
-            if str(regime).upper() == "DEAD":
-                continue
-
+         
             aist = self.aist.compute(pair, df)
 
             item = dict(item)
