@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
 
@@ -66,9 +66,18 @@ class V4PairIntake:
     def build_contexts(self, pairs: Iterable[str]) -> List[PairContext]:
         fg = self.fetch_fg()
         fg_score = int(fg["score"])
+        logger.info(
+            "V4 FG | score=%s label=%s",
+            fg_score,
+            fg["label"],
+        )
 
         active = self.universe.get_active_pairs(interval=240, limit=None)
+        logger.info("V4 universe | active_count=%s", len(active))
+
         wanted = {str(p).upper() for p in pairs}
+        logger.info("V4 requested pairs=%s", sorted(wanted))
+
         contexts: List[PairContext] = []
 
         for item in active:
@@ -111,6 +120,11 @@ class V4PairIntake:
                 )
             )
 
+        logger.info(
+            "V4 intake complete | contexts=%s | context_pairs=%s",
+            len(contexts),
+            [c.pair for c in contexts],
+        )
         return contexts
 
 
@@ -118,15 +132,30 @@ class LegacyEngineAdapter:
     def __init__(self, engine_id: str) -> None:
         self.engine_id = engine_id
         self.engine_cls = ENGINE_CLASSES.get(engine_id)
+        if self.engine_cls is None:
+            logger.warning("V4 adapter | engine %s not found in ENGINE_CLASSES", engine_id)
 
     def generate(self, context: PairContext) -> List[SpecialistObservation]:
         if self.engine_cls is None:
+            logger.info(
+                "V4 adapter | pair=%s engine=%s skipped (missing class)",
+                context.pair,
+                self.engine_id,
+            )
             return []
 
         df = context.metadata.get("ohlc_df")
         regime = str(context.metadata.get("regime", context.market_regime))
         fg_score = int(context.metadata.get("fg_score", 50))
         aist = context.metadata.get("aist", {})
+
+        logger.info(
+            "V4 adapter | calling engine=%s pair=%s regime=%s fg=%s",
+            self.engine_id,
+            context.pair,
+            regime,
+            fg_score,
+        )
 
         try:
             raw = self.engine_cls().generate(
@@ -137,7 +166,12 @@ class LegacyEngineAdapter:
                 aist=aist,
             )
         except Exception as exc:
-            logger.warning("V4 engine %s failed on %s: %s", self.engine_id, context.pair, exc)
+            logger.warning(
+                "V4 engine %s failed on %s: %s",
+                self.engine_id,
+                context.pair,
+                exc,
+            )
             return []
 
         logger.info(
@@ -152,14 +186,50 @@ class LegacyEngineAdapter:
 
         bias = str(raw.get("bias", "")).upper()
         if bias not in {"LONG", "SHORT"}:
+            logger.info(
+                "V4 TAK | pair=%s engine=%s dropped (no bias)",
+                context.pair,
+                self.engine_id,
+            )
             return []
 
         rr = float(raw.get("rr", 0.0) or 0.0)
         structure_quality = float(raw.get("structurequality", 0.5) or 0.5)
-        vol_ratio = float(raw.get("volumeratio", context.metadata.get("volumeratio", 1.0)) or 1.0)
+        vol_ratio = float(
+            raw.get("volumeratio", context.metadata.get("volumeratio", 1.0)) or 1.0
+        )
 
-        confidence = max(0.0, min(1.0, (rr * 0.22) + (structure_quality * 0.45) + min(vol_ratio, 2.0) * 0.10))
-        score = max(0.0, min(100.0, rr * 25.0 + structure_quality * 35.0 + min(vol_ratio, 2.0) * 10.0 + confidence * 15.0))
+        confidence = max(
+            0.0,
+            min(
+                1.0,
+                (rr * 0.22)
+                + (structure_quality * 0.45)
+                + min(vol_ratio, 2.0) * 0.10,
+            ),
+        )
+        score = max(
+            0.0,
+            min(
+                100.0,
+                rr * 25.0
+                + structure_quality * 35.0
+                + min(vol_ratio, 2.0) * 10.0
+                + confidence * 15.0,
+            ),
+        )
+
+        logger.info(
+            "V4 OBS | pair=%s engine=%s bias=%s rr=%.2f struct=%.2f vol=%.2f conf=%.3f score=%.2f",
+            context.pair,
+            self.engine_id,
+            bias,
+            rr,
+            structure_quality,
+            vol_ratio,
+            confidence,
+            score,
+        )
 
         thesis = (
             f"{self.engine_id} produced a {bias} setup on {context.pair} "
@@ -210,6 +280,7 @@ class V4Scanner:
     def build_registry(self) -> SpecialistRegistry:
         registry = SpecialistRegistry()
         registry.register("S6", LegacyEngineAdapter("S6").generate)
+        logger.info("V4 registry | specialists=%s", registry.list_specialists())
         return registry
 
     def run_scan(self, pairs: Iterable[str]) -> Dict[str, Any]:
@@ -227,10 +298,21 @@ class V4Scanner:
         )
 
         contexts = self.intake.build_contexts(pairs)
+        logger.info("V4 orchestrator | context_count=%s", len(contexts))
+
         all_candidates = []
 
         for context in contexts:
-            all_candidates.extend(orchestrator._build_candidates_for_pair(context))
+            logger.info("V4 orchestrator | run pair=%s regime=%s", context.pair, context.market_regime)
+            candidates_for_pair = orchestrator._build_candidates_for_pair(context)
+            logger.info(
+                "V4 orchestrator | pair=%s candidates=%s",
+                context.pair,
+                len(candidates_for_pair),
+            )
+            all_candidates.extend(candidates_for_pair)
+
+        logger.info("V4 orchestrator | total_candidates=%s", len(all_candidates))
 
         scan_result = publisher.publish(all_candidates)
         scan_result.audit["pairs_scanned"] = [ctx.pair for ctx in contexts]
