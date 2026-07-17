@@ -274,7 +274,7 @@ class V4Scanner:
         self.intake = V4PairIntake()
 
     def build_registry(self) -> SpecialistRegistry:
-        registry = SpecialistRegistry()
+        registry = ScannerSpecialistRegistry()
         registry.register("S6", LegacyEngineAdapter("S6").generate)
         logger.info("V4 registry | specialists=%s", registry.list_specialists())
         return registry
