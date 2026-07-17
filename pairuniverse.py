@@ -328,12 +328,15 @@ class PairUniverse:
             "ohlc_4h": df.values.tolist(),
         }
 
-    def get_active_pairs(
-        self,
-        interval: int = 240,
-        limit: Optional[int] = None,
-        sort_by: str = "atr_pct",
-    ) -> List[Dict[str, Any]]:
+
+def get_active_pairs(...):
+       ...
+       ranked.sort(key=lambda d: d.get(sort_by, 0.0), reverse=True)
+       if limit is not None:
+           ranked = ranked[:limit]
+       logger.info("Active universe: %d pairs (sorted by %s).", len(ranked), sort_by)
+       return ranked
+        
         """Build the ranked active pair universe.
 
         Args:
