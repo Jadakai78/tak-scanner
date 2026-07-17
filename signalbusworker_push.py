@@ -1,92 +1,81 @@
 from __future__ import annotations
 
-import logging
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Iterable, List, Optional
 
-from scannercouncil import ScannerCouncil
-from scannerpair_intake import ScannerPairIntake
-from scannerpublisher import ScannerPublisher
-from scannerreviewer_remi import RemiReviewer
-from scannerspecialist_registry import SpecialistRegistry
-from scannermodels import CandidateSignal, ScanResult
+import pandas as pd
 
-logger = logging.getLogger("takscannerv4")
+from pairuniverse import PairUniverse
+from regimeclassifier import RegimeClassifier
 
 
-class ScannerOrchestrator:
+OHLC_COLUMNS = ["time", "open", "high", "low", "close", "vwap", "volume", "count"]
+
+
+class ScannerPairIntake:
     def __init__(
         self,
-        intake: Optional[ScannerPairIntake] = None,
-        specialists: Optional[SpecialistRegistry] = None,
-        remi: Optional[RemiReviewer] = None,
-        council: Optional[ScannerCouncil] = None,
-        publisher: Optional[ScannerPublisher] = None,
+        universe: Optional[PairUniverse] = None,
+        regime_classifier: Optional[RegimeClassifier] = None,
+        max_pairs: Optional[int] = None,
+        interval: int = 240,
+        min_rows: int = 60,
     ) -> None:
-        self.intake = intake or ScannerPairIntake()
-        self.specialists = specialists or SpecialistRegistry()
-        self.remi = remi or RemiReviewer()
-        self.council = council or ScannerCouncil()
-        self.publisher = publisher or ScannerPublisher()
+        self.universe = universe or PairUniverse()
+        self.regime_classifier = regime_classifier or RegimeClassifier()
+        self.max_pairs = max_pairs
+        self.interval = interval
+        self.min_rows = min_rows
 
-    def review_candidate(self, candidate: CandidateSignal) -> CandidateSignal:
-        candidate.review = self.remi.review(candidate)
-        candidate.council = self.council.adjudicate(candidate)
+    def fetch_active_pairs(self) -> List[Dict[str, Any]]:
+        return list(
+            self.universe.get_active_pairs(
+                interval=self.interval,
+                limit=self.max_pairs,
+            )
+        )
 
-        if candidate.council.route == "live_signals":
-            candidate.final_status = "live"
-        elif candidate.council.route == "caution_signals":
-            candidate.final_status = "caution"
-        else:
-            candidate.final_status = "killed"
-        return candidate
+    def df_from_universe_item(self, item: Dict[str, Any]) -> Optional[pd.DataFrame]:
+        raw = item.get("ohlc4h")
+        if not raw:
+            return None
 
-    def run(
-        self,
-        fg_score: int = 50,
-        extras: Optional[Dict[str, Any]] = None,
-    ) -> ScanResult:
-        live_candidates: List[CandidateSignal] = []
-        caution_candidates: List[CandidateSignal] = []
-        killed_candidates: List[CandidateSignal] = []
+        try:
+            df = pd.DataFrame(raw, columns=OHLC_COLUMNS)
+        except Exception:
+            return None
 
-        pair_records = self.intake.build_pair_records()
+        required = ["open", "high", "low", "close", "vwap", "volume"]
+        for col in required:
+            df[col] = pd.to_numeric(df[col], errors="coerce")
 
-        for record in pair_records:
-            pair = record["pair"]
-            regime = record["regime"]
-            df = record["dataframe"]
+        df = df.dropna().reset_index(drop=True)
+        if len(df) < self.min_rows:
+            return None
+        return df
 
-            logger.info("V4 orchestrator run pair=%s regime=%s", pair, regime)
+    def build_pair_records(self) -> List[Dict[str, Any]]:
+        records: List[Dict[str, Any]] = []
 
-            candidates = self.specialists.collect_candidates_for_pair(
+        for item in self.fetch_active_pairs():
+            pair = str(item.get("pair", "UNKNOWN"))
+            df = self.df_from_universe_item(item)
+            if df is None:
+                continue
+
+            regime = self.regime_classifier.classify(
                 pair=pair,
                 df=df,
-                regime=regime,
-                fg_score=fg_score,
-                extras=extras,
+                fg_score=int(item.get("fg_score", 50)),
             )
 
-            for candidate in candidates:
-                reviewed = self.review_candidate(candidate)
+            records.append(
+                {
+                    "pair": pair,
+                    "pair_key": item.get("pair_key"),
+                    "regime": regime,
+                    "dataframe": df,
+                    "source": item,
+                }
+            )
 
-                if reviewed.final_status == "live":
-                    live_candidates.append(reviewed)
-                elif reviewed.final_status == "caution":
-                    caution_candidates.append(reviewed)
-                else:
-                    killed_candidates.append(reviewed)
-
-        audit = {
-            "pair_count": len(pair_records),
-            "live_count": len(live_candidates),
-            "caution_count": len(caution_candidates),
-            "killed_count": len(killed_candidates),
-        }
-
-        return self.publisher.build_scan_result(
-            live_candidates=live_candidates,
-            caution_candidates=caution_candidates,
-            killed_candidates=killed_candidates,
-            positions=[],
-            audit=audit,
-        )
+        return records
