@@ -8,26 +8,15 @@ from signalbusschema import build_signal_bus_payload
 from scannermodels import ScanResult
 
 
-DEFAULT_SIGNALBUS_PATH = Path("app/signalbus.json")
-
-
 class SignalBusWriter:
-    def __init__(self, bus_path: Path | str = DEFAULT_SIGNALBUS_PATH) -> None:
-        self.bus_path = Path(bus_path)
+    def __init__(self, output_path: str = "app/signalbus.json") -> None:
+        self.output_path = Path(output_path)
 
-    def write_payload(self, payload: Dict[str, Any]) -> Path:
-        self.bus_path.parent.mkdir(parents=True, exist_ok=True)
-        self.bus_path.write_text(
+    def write(self, result: ScanResult) -> Dict[str, Any]:
+        payload = build_signal_bus_payload(result)
+        self.output_path.parent.mkdir(parents=True, exist_ok=True)
+        self.output_path.write_text(
             json.dumps(payload, ensure_ascii=False, indent=2),
             encoding="utf-8",
         )
-        return self.bus_path
-
-    def write_scan_result(self, result: ScanResult) -> Path:
-        payload = build_signal_bus_payload(result)
-        return self.write_payload(payload)
-
-    def read_payload(self) -> Dict[str, Any]:
-        if not self.bus_path.exists():
-            return {}
-        return json.loads(self.bus_path.read_text(encoding="utf-8"))
+        return payload
