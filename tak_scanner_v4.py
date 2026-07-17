@@ -8,6 +8,7 @@ from scannerreviewer_remi import RemiReviewer
 from scannercouncil import ScannerCouncil
 from scannerpublisher import ScannerPublisher
 from signalbusbus_writer import SignalBusWriter
+from engines import ENGINE_CLASSES
 
 
 def register_core_specialists(registry: SpecialistRegistry) -> None:
