@@ -2,52 +2,80 @@ from __future__ import annotations
 
 from typing import Any, Dict, Iterable, List, Optional
 
-from scannermodels import PairContext
+import pandas as pd
+
+from pairuniverse import PairUniverse
+from regimeclassifier import RegimeClassifier
+
+
+OHLC_COLUMNS = ["time", "open", "high", "low", "close", "vwap", "volume", "count"]
 
 
 class ScannerPairIntake:
     def __init__(
         self,
-        default_timeframe: str = "1h",
-        min_rows: int = 50,
+        universe: Optional[PairUniverse] = None,
+        regime_classifier: Optional[RegimeClassifier] = None,
+        max_pairs: Optional[int] = None,
+        interval: int = 240,
+        min_rows: int = 60,
     ) -> None:
-        self.default_timeframe = default_timeframe
+        self.universe = universe or PairUniverse()
+        self.regime_classifier = regime_classifier or RegimeClassifier()
+        self.max_pairs = max_pairs
+        self.interval = interval
         self.min_rows = min_rows
 
-    def normalize_pairs(self, raw_pairs: Iterable[Dict[str, Any]]) -> List[PairContext]:
-        contexts: List[PairContext] = []
-
-        for item in raw_pairs:
-            pair = str(item.get("pair", "")).strip().upper()
-            if not pair:
-                continue
-
-            history = item.get("ohlc") or item.get("candles") or []
-            if isinstance(history, list) and len(history) < self.min_rows:
-                continue
-
-            context = PairContext(
-                pair=pair,
-                timeframe=str(item.get("timeframe", self.default_timeframe)),
-                last_price=self._safe_float(item.get("last_price")),
-                market_regime=str(item.get("market_regime", "unknown")),
-                metadata={
-                    "atr_pct": self._safe_float(item.get("atr_pct")),
-                    "volume_ratio": self._safe_float(item.get("volume_ratio")),
-                    "fg_score": item.get("fg_score"),
-                    "ohlc": history,
-                    "source": item.get("source", "intake"),
-                },
+    def fetch_active_pairs(self) -> List[Dict[str, Any]]:
+        return list(
+            self.universe.get_active_pairs(
+                interval=self.interval,
+                limit=self.max_pairs,
             )
-            contexts.append(context)
+        )
 
-        return contexts
-
-    @staticmethod
-    def _safe_float(value: Optional[Any]) -> Optional[float]:
-        try:
-            if value is None:
-                return None
-            return float(value)
-        except (TypeError, ValueError):
+    def df_from_universe_item(self, item: Dict[str, Any]) -> Optional[pd.DataFrame]:
+        raw = item.get("ohlc4h")
+        if not raw:
             return None
+
+        try:
+            df = pd.DataFrame(raw, columns=OHLC_COLUMNS)
+        except Exception:
+            return None
+
+        required = ["open", "high", "low", "close", "vwap", "volume"]
+        for col in required:
+            df[col] = pd.to_numeric(df[col], errors="coerce")
+
+        df = df.dropna().reset_index(drop=True)
+        if len(df) < self.min_rows:
+            return None
+        return df
+
+    def build_pair_records(self) -> List[Dict[str, Any]]:
+        records: List[Dict[str, Any]] = []
+
+        for item in self.fetch_active_pairs():
+            pair = str(item.get("pair", "UNKNOWN"))
+            df = self.df_from_universe_item(item)
+            if df is None:
+                continue
+
+            regime = self.regime_classifier.classify(
+                pair=pair,
+                df=df,
+                fg_score=int(item.get("fg_score", 50)),
+            )
+
+            records.append(
+                {
+                    "pair": pair,
+                    "pair_key": item.get("pair_key"),
+                    "regime": regime,
+                    "dataframe": df,
+                    "source": item,
+                }
+            )
+
+        return records
