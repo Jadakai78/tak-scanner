@@ -86,7 +86,7 @@ class TakScannerV4:
         try:
             import pandas as pd
 
-            raw = item.get("ohlc4h")
+            raw = item.get("ohlc_4h")
             if not raw:
                 return None
             df = pd.DataFrame(raw, columns=OHLCOLUMNS)
