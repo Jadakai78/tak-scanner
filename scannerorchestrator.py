@@ -1,70 +1,142 @@
 from __future__ import annotations
 
-from typing import Dict, Iterable, List
+import logging
+from typing import Any, Dict, Iterable, List
 
 from scannercandidate_factory import build_candidate
+from scannermodels import CandidateSignal, PairContext, SpecialistObservation
 from scannercouncil import ScannerCouncil
-from scannerpair_intake import ScannerPairIntake
-from scannerpublisher import ScannerPublisher
 from scannerreviewer_remi import RemiReviewer
-from scannerspecialist_registry import SpecialistRegistry
-from scannermodels import CandidateSignal, PairContext, ScanResult, SpecialistObservation
+
+logger = logging.getLogger("scannerorchestrator")
 
 
 class ScannerOrchestrator:
     def __init__(
         self,
-        intake: ScannerPairIntake,
-        registry: SpecialistRegistry,
-        remi: RemiReviewer,
-        council: ScannerCouncil,
-        publisher: ScannerPublisher,
+        specialist_registry: Any,
+        remi_reviewer: RemiReviewer | None = None,
+        council: ScannerCouncil | None = None,
     ) -> None:
-        self.intake = intake
-        self.registry = registry
-        self.remi = remi
-        self.council = council
-        self.publisher = publisher
+        self.specialist_registry = specialist_registry
+        self.remi_reviewer = remi_reviewer or RemiReviewer()
+        self.council = council or ScannerCouncil()
 
-    def run(self, raw_pairs: Iterable[Dict]) -> ScanResult:
-        pair_contexts = self.intake.normalize_pairs(raw_pairs)
-        candidates: List[CandidateSignal] = []
-        pair_audit: Dict[str, Dict[str, int]] = {}
+    def run(self, contexts: Iterable[PairContext], shared_state: Dict[str, Any] | None = None) -> List[CandidateSignal]:
+        shared_state = dict(shared_state or {})
+        contexts = list(contexts)
 
-        for context in pair_contexts:
-            observations = self.registry.run_for_pair(context)
-            pair_audit[context.pair] = {
-                "observations": len(observations),
-                "candidates": 0,
-            }
+        logger.info("V4 orchestrator contextcount=%s", len(contexts))
 
-            for observation in observations:
-                candidate = build_candidate(observation)
-                candidate.review = self.remi.review(candidate)
-                candidate.score = candidate.review.adjusted_score
-                candidate.confidence = max(0.0, min(1.0, candidate.confidence + candidate.review.confidence_delta))
-                candidate.council = self.council.adjudicate(candidate)
-                candidate.final_status = candidate.council.decision
-                candidates.append(candidate)
+        finalized: List[CandidateSignal] = []
 
-            pair_audit[context.pair]["candidates"] = len(observations)
+        for context in contexts:
+            logger.info(
+                "V4 orchestrator run pair=%s regime=%s",
+                context.pair,
+                context.market_regime,
+            )
 
-        result = self.publisher.publish(candidates)
-        result.audit.update(
-            {
-                "pair_count": len(pair_contexts),
-                "registry_size": len(self.registry),
-                "pair_audit": pair_audit,
-            }
-        )
-        return result
+            pair_candidates = self._run_pair(context, shared_state)
+            logger.info(
+                "V4 orchestrator pair=%s candidates=%s",
+                context.pair,
+                len(pair_candidates),
+            )
+            finalized.extend(pair_candidates)
 
+        return finalized
 
-def build_default_orchestrator() -> ScannerOrchestrator:
-    return ScannerOrchestrator(
-        intake=ScannerPairIntake(),
-        registry=SpecialistRegistry(),
-        remi=RemiReviewer(),
-        council=ScannerCouncil(),
-        publisher=ScannerPublisher(),
-    )
+    def _run_pair(self, context: PairContext, shared_state: Dict[str, Any]) -> List[CandidateSignal]:
+        specialists = self.specialist_registry.resolve_for_regime(context.market_regime)
+        completed: List[CandidateSignal] = []
+
+        for specialist in specialists:
+            name = getattr(specialist, "name", specialist.__class__.__name__)
+            fgscore = shared_state.get("fgscore", 50)
+
+            logger.info(
+                "V4 adapter calling engine=%s pair=%s regime=%s fg=%s",
+                name,
+                context.pair,
+                context.market_regime,
+                fgscore,
+            )
+
+            observation = self._invoke_specialist(specialist, context, shared_state)
+
+            logger.info(
+                "V4 TAK pair=%s engine=%s rawnone=%s",
+                context.pair,
+                name,
+                observation is None,
+            )
+
+            if observation is None:
+                continue
+
+            candidate = build_candidate(observation)
+            review = self.remi_reviewer.review(candidate)
+            candidate.review = review
+            candidate.confidence = round(max(0.0, min(1.0, candidate.confidence + review.confidence_delta)), 4)
+            candidate.score = review.adjusted_score
+
+            council_result = self.council.adjudicate(candidate)
+            candidate.council = council_result
+            candidate.final_status = council_result.decision
+
+            logger.info(
+                "V4 OBS pair=%s engine=%s bias=%s conf=%.3f score=%.2f route=%s",
+                context.pair,
+                name,
+                candidate.side,
+                candidate.confidence,
+                candidate.score,
+                council_result.route,
+            )
+
+            completed.append(candidate)
+
+        return completed
+
+    def _invoke_specialist(
+        self,
+        specialist: Any,
+        context: PairContext,
+        shared_state: Dict[str, Any],
+    ) -> SpecialistObservation | None:
+        for method_name in ("observe", "scan", "generate", "run"):
+            method = getattr(specialist, method_name, None)
+            if callable(method):
+                result = method(context=context, shared_state=shared_state)
+                return self._normalize_observation(result, specialist, context)
+        return None
+
+    def _normalize_observation(
+        self,
+        result: Any,
+        specialist: Any,
+        context: PairContext,
+    ) -> SpecialistObservation | None:
+        if result is None:
+            return None
+
+        if isinstance(result, SpecialistObservation):
+            return result
+
+        if isinstance(result, dict):
+            return SpecialistObservation(
+                specialist=str(result.get("specialist", getattr(specialist, "name", specialist.__class__.__name__))),
+                pair=str(result.get("pair", context.pair)),
+                setup_type=str(result.get("setup_type", "unclassified")),
+                side=str(result.get("side", result.get("bias", "NEUTRAL"))),
+                confidence=float(result.get("confidence", 0.0)),
+                score=float(result.get("score", 0.0)),
+                thesis=str(result.get("thesis", result.get("summary", ""))),
+                evidence=dict(result.get("evidence", {})),
+                warnings=list(result.get("warnings", [])),
+                tags=list(result.get("tags", [])),
+                context=dict(result.get("context", {})),
+            )
+
+        return None
