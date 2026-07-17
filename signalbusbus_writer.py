@@ -25,3 +25,4 @@ class SignalBusBusWriter:
             len(payload.get("killed_signals", [])),
         )
         return self.output_path
+SignalBusWriter = SignalBusBusWriter
