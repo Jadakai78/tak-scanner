@@ -28,11 +28,7 @@ logger = logging.getLogger("SpecialistRegistry")
 
 
 class SpecialistRegistry:
-    def build_registry(self):
-    registry = SpecialistRegistry()
-    ...
-    return registry
-    
+ 
     def __init__(
         self,
         conviction_scorer: Optional[ConvictionScorer] = None,
