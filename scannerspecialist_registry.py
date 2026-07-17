@@ -24,10 +24,10 @@ except ImportError:
     from strategies import scoredeltacontext
 from scannermodels import PairContext, SpecialistObservation
 
-logger = logging.getLogger("scannerspecialistregistry")
+logger = logging.getLogger("SpecialistRegistry")
 
 
-class ScannerSpecialistRegistry:
+class SpecialistRegistry:
     def __init__(
         self,
         conviction_scorer: Optional[ConvictionScorer] = None,
