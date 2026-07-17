@@ -1,89 +1,83 @@
 from __future__ import annotations
 
-from typing import Dict, List
+from typing import Dict, Iterable, List
 
 from scannermodels import CandidateSignal, PublishedSignal, ScanResult
 
 
 class ScannerPublisher:
-    def _build_payload(self, candidate: CandidateSignal) -> Dict:
-        review = candidate.review
-        council = candidate.council
+    def publish(
+        self,
+        candidates: Iterable[CandidateSignal],
+        positions: List[Dict[str, object]] | None = None,
+        audit: Dict[str, object] | None = None,
+    ) -> ScanResult:
+        result = ScanResult(
+            positions=list(positions or []),
+            audit=dict(audit or {}),
+        )
 
-        return {
-            "candidate_id": candidate.candidate_id,
-            "pair": candidate.pair,
-            "setup_type": candidate.setup_type,
-            "side": candidate.side,
-            "specialist": candidate.specialist,
-            "score": candidate.score,
-            "confidence": candidate.confidence,
-            "thesis": candidate.thesis,
+        for candidate in candidates:
+            published = self._to_published(candidate)
+
+            route = "killed_signals"
+            if candidate.council is not None:
+                route = candidate.council.route
+
+            if route == "live_signals":
+                result.live_signals.append(published)
+            elif route == "caution_signals":
+                result.caution_signals.append(published)
+            else:
+                result.killed_signals.append(published)
+
+        result.audit.setdefault("counts", {})
+        result.audit["counts"]["live_signals"] = len(result.live_signals)
+        result.audit["counts"]["caution_signals"] = len(result.caution_signals)
+        result.audit["counts"]["killed_signals"] = len(result.killed_signals)
+        result.audit["counts"]["positions"] = len(result.positions)
+        return result
+
+    def _to_published(self, candidate: CandidateSignal) -> PublishedSignal:
+        review_score = candidate.review.adjusted_score if candidate.review else candidate.score
+        route = candidate.council.route if candidate.council else "killed_signals"
+        execution_ready = candidate.council.execution_ready if candidate.council else False
+
+        payload = {
             "entry_idea": candidate.entry_idea,
             "stop_idea": candidate.stop_idea,
             "target_idea": candidate.target_idea,
             "evidence": dict(candidate.evidence),
-            "warnings": list(candidate.warnings),
-            "tags": list(candidate.tags),
             "context": dict(candidate.context),
-            "review": {
-                "decision": None if review is None else review.decision,
-                "adjusted_score": None if review is None else review.adjusted_score,
-                "confidence_delta": None if review is None else review.confidence_delta,
-                "rationale": None if review is None else review.rationale,
-                "caution_flags": [] if review is None else list(review.caution_flags),
-                "evidence_notes": [] if review is None else list(review.evidence_notes),
+            "review": None if candidate.review is None else {
+                "decision": candidate.review.decision,
+                "adjusted_score": candidate.review.adjusted_score,
+                "confidence_delta": candidate.review.confidence_delta,
+                "rationale": candidate.review.rationale,
+                "caution_flags": list(candidate.review.caution_flags),
+                "evidence_notes": list(candidate.review.evidence_notes),
             },
-            "council": {
-                "decision": None if council is None else council.decision,
-                "battlefield_ok": None if council is None else council.battlefield_ok,
-                "veto_reasons": [] if council is None else list(council.veto_reasons),
-                "route": None if council is None else council.route,
-                "execution_ready": False if council is None else council.execution_ready,
+            "council": None if candidate.council is None else {
+                "decision": candidate.council.decision,
+                "battlefield_ok": candidate.council.battlefield_ok,
+                "veto_reasons": list(candidate.council.veto_reasons),
+                "route": candidate.council.route,
+                "execution_ready": candidate.council.execution_ready,
             },
-            "final_status": candidate.final_status,
         }
 
-    def _publish_one(self, bucket: str, candidate: CandidateSignal) -> PublishedSignal:
-        adjusted_score = candidate.score
-        route = bucket
-        execution_ready = False
-
-        if candidate.review is not None:
-            adjusted_score = candidate.review.adjusted_score
-        if candidate.council is not None:
-            route = candidate.council.route
-            execution_ready = candidate.council.execution_ready
-
         return PublishedSignal(
-            bucket=bucket,
+            bucket=route,
             pair=candidate.pair,
             candidate_id=candidate.candidate_id,
             setup_type=candidate.setup_type,
             side=candidate.side,
-            score=round(float(adjusted_score), 2),
+            score=round(float(review_score), 2),
             specialist=candidate.specialist,
             thesis=candidate.thesis,
             route=route,
             execution_ready=execution_ready,
             warnings=list(candidate.warnings),
             tags=list(candidate.tags),
-            payload=self._build_payload(candidate),
+            payload=payload,
         )
-
-    def publish(
-        self,
-        live_candidates: List[CandidateSignal],
-        caution_candidates: List[CandidateSignal],
-        killed_candidates: List[CandidateSignal],
-        positions: List[Dict] | None = None,
-        audit: Dict | None = None,
-    ) -> ScanResult:
-        result = ScanResult(
-            live_signals=[self._publish_one("live_signals", c) for c in live_candidates],
-            caution_signals=[self._publish_one("caution_signals", c) for c in caution_candidates],
-            killed_signals=[self._publish_one("killed_signals", c) for c in killed_candidates],
-            positions=list(positions or []),
-            audit=dict(audit or {}),
-        )
-        return result
