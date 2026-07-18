@@ -270,6 +270,86 @@ def run():
     publisher = ScannerPublisher()
     result    = publisher.publish(candidates)
 
+    # 6b. Trap Detector — runs after publish, before bus write
+    # Build rts_map: pair → list of raw RTS signal dicts from this scan cycle
+    # RTS engines are already in candidates; we collect their raw payloads here
+    rts_map: dict = {}
+    bar_map: dict = {}
+    for row in pair_rows:
+        pair_key = row.get("pair", "")
+        df = row.get("df")
+        if df is not None and len(df) > 0:
+            last = df.iloc[-1]
+            bar_map[pair_key] = {
+                "high":  float(last.get("high",  0)),
+                "low":   float(last.get("low",   0)),
+                "close": float(last.get("close", 0)),
+                "open":  float(last.get("open",  0)),
+            }
+    # Collect RTS signals from published result
+    for ps in result.live_signals:
+        specialist = getattr(ps, "specialist", "") or ""
+        if any(rts in specialist.upper() for rts in ("RTS_LIQ","RTS_BOS","RTS_CHOCH","RTS_ZONE","RTS_BOTTLE")):
+            pair_key = getattr(ps, "pair", "")
+            raw = dict(ps.payload) if hasattr(ps, "payload") else {}
+            raw["engine"] = specialist
+            raw["pair"]   = pair_key
+            rts_map.setdefault(pair_key, []).append(raw)
+
+    try:
+        from trap_detector import TrapDetector, april_system_view
+        td = TrapDetector()
+        # Flatten live signals to dicts for the detector
+        live_dicts = []
+        for ps in result.live_signals:
+            d = dict(ps.payload) if hasattr(ps, "payload") else {}
+            d["specialist"] = getattr(ps, "specialist", "")
+            d["engine"]     = getattr(ps, "specialist", "")
+            d["pair"]       = getattr(ps, "pair", "")
+            d["bias"]       = getattr(ps, "side", "").replace("LONG","LONG").replace("SHORT","SHORT")
+            d["candidate_id"] = getattr(ps, "candidate_id", "")
+            live_dicts.append(d)
+
+        survivors, trap_killed_dicts, trap_flips = td.evaluate(
+            live_signals=live_dicts,
+            rts_outputs=rts_map,
+            current_bars=bar_map,
+        )
+
+        # Rebuild result.live_signals from survivors (by candidate_id)
+        survivor_ids = {s.get("candidate_id") for s in survivors}
+        result.live_signals = [
+            ps for ps in result.live_signals
+            if getattr(ps, "candidate_id", None) in survivor_ids
+        ]
+
+        # Move trap-killed signals into result.killed_signals
+        for killed_d in trap_killed_dicts:
+            # Find the matching PublishedSignal object
+            for ps in result.caution_signals + result.live_signals:
+                if getattr(ps, "candidate_id", None) == killed_d.get("candidate_id"):
+                    result.killed_signals.append(ps)
+                    break
+
+        # April system view — logged for council/feed use
+        caution_count = len([s for s in survivors if s.get("trap_caution")])
+        april_view    = april_system_view(trap_killed_dicts, trap_flips, caution_count)
+        logger.info(
+            "APRIL council_mode=%s reason=%s killed=%d flips=%d",
+            april_view["council_mode"], april_view["reason"],
+            len(trap_killed_dicts), len(trap_flips),
+        )
+
+        # Store trap flips and april view in audit for bus payload
+        if not hasattr(result, "audit") or result.audit is None:
+            result.audit = {}
+        result.audit["trap_flips"]    = trap_flips
+        result.audit["april_view"]    = april_view
+        result.audit["trap_killed_count"] = len(trap_killed_dicts)
+
+    except Exception as exc:
+        logger.warning("TrapDetector error (non-fatal): %s", exc)
+
     live    = len(result.live_signals)
     caution = len(result.caution_signals)
     killed  = len(result.killed_signals)
