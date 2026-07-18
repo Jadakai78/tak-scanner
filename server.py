@@ -277,6 +277,19 @@ def icon512():
 
 # ── Execution endpoints ─────────────────────────────────────────────────────
 
+def _fetch_bus_from_kv() -> dict:
+    """Fetch the live bus from CF KV — single source of truth."""
+    import urllib.request
+    try:
+        with urllib.request.urlopen(f"{CF_WORKER_URL}/api/signals", timeout=8) as resp:
+            return json.loads(resp.read().decode("utf-8"))
+    except Exception:
+        try:
+            return json.loads(SIGNAL_BUS.read_text())
+        except Exception:
+            return {"signals": []}
+
+
 def _push_verdict_to_kv(bus: dict):
     """Push updated bus (with verdict changes) back to CF KV so all services see it."""
     import urllib.request, urllib.error
@@ -307,7 +320,7 @@ def position_execute():
     if not pair:
         return jsonify({"ok": False, "error": "pair required"}), 400
     try:
-        bus = json.loads(SIGNAL_BUS.read_text())
+        bus = _fetch_bus_from_kv()
         updated = False
         for sig in bus.get("signals", []):
             if (sig.get("pair") == pair and
@@ -340,7 +353,7 @@ def position_wait():
     if not pair:
         return jsonify({"ok": False, "error": "pair required"}), 400
     try:
-        bus = json.loads(SIGNAL_BUS.read_text())
+        bus = _fetch_bus_from_kv()
         for sig in bus.get("signals", []):
             if sig.get("pair") == pair:
                 sig["december_verdict"] = "WAIT"
@@ -361,7 +374,7 @@ def position_reject():
     if not pair:
         return jsonify({"ok": False, "error": "pair required"}), 400
     try:
-        bus = json.loads(SIGNAL_BUS.read_text())
+        bus = _fetch_bus_from_kv()
         for sig in bus.get("signals", []):
             if sig.get("pair") == pair:
                 sig["december_verdict"] = "REJECT"
