@@ -644,3 +644,22 @@ if __name__ == "__main__":
         print(f"       def={r['defensive_score']:.3f} off={r['offensive_score']:.3f} "
               f"trap={r['trap_risk']:.3f} bonus={r['bonus_multiplier']:.2f}× "
               f"reasons={r['bonus_reasons']}")
+
+
+# ── Compatibility shim — used by rts_sniper.py ───────────────────────────────
+def score_v2_shadow(signal: Dict[str, Any], df: Any = None) -> Dict[str, Any]:
+    """Shadow scorer wrapper for RTS Sniper.
+
+    Runs ConvictionScorer.score() on the enriched signal and returns its
+    output dict so rts_sniper can read trap_risk, conviction, action_state
+    etc. without importing the full scorer class directly.
+
+    df is accepted for API compat but not used (microstructure enrichment
+    is done upstream by the caller).
+    """
+    try:
+        scorer = ConvictionScorer()
+        return scorer.score(signal)
+    except Exception as exc:
+        logger.warning("score_v2_shadow failed: %s", exc)
+        return {}
