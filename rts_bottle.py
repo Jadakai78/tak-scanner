@@ -423,4 +423,36 @@ class RTSBottle:
             choch,
             delta_score,
         )
+
+        # ── RTS-DELTA overlay — apply delta_modifier to offence_score ─────────
+        try:
+            from rts_delta import score_delta_context
+            _delta_ctx = score_delta_context(df, bias)
+            _mod = float(_delta_ctx.get("delta_modifier", 0.0))
+            if _mod != 0.0:
+                raw["offence_score"] = round(
+                    min(1.0, max(0.0, float(raw.get("offence_score", 0.65)) + _mod)), 3
+                )
+                # Re-evaluate intent if modifier pushes score over/under thresholds
+                _off = raw["offence_score"]
+                _trap = float(raw.get("trap_score", 0.0))
+                _old_intent = raw.get("intent", "WAIT")
+                if _old_intent in ("WAIT", "PROBE") and _off >= 0.72 and _trap >= 0.75:
+                    raw["intent"] = "ATTACK_TRAP"
+                elif _old_intent == "WAIT" and _off >= 0.60:
+                    raw["intent"] = "PROBE"
+                elif _old_intent in ("ATTACK_TRAP", "ATTACK_BREAK", "ATTACK") and _off < 0.50:
+                    raw["intent"] = "PROBE"
+            raw.update({
+                "delta_bias":          _delta_ctx.get("delta_bias"),
+                "sponsorship_quality": _delta_ctx.get("sponsorship_quality"),
+                "delta_modifier":      _mod,
+                "vp_context":          _delta_ctx.get("vp_context"),
+                "vpoc":                _delta_ctx.get("vpoc"),
+                "vah":                 _delta_ctx.get("vah"),
+                "val":                 _delta_ctx.get("val"),
+            })
+        except Exception as _delta_exc:
+            logger.debug("RTS-DELTA overlay skipped: %s", _delta_exc)
+
         return raw
