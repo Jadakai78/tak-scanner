@@ -307,9 +307,8 @@ def run():
 
     orchestrator = ScannerOrchestrator(
         specialist_registry=registry,
-        reviewer=RemiReviewer(),
+        remi_reviewer=RemiReviewer(),
         council=ScannerCouncil(),
-        publisher=ScannerPublisher(),
     )
 
     shared_state = {
@@ -319,8 +318,11 @@ def run():
         "regime": regime,
     }
 
-    result = orchestrator.run(contexts, shared_state=shared_state)
+    candidates = orchestrator.run(contexts, shared_state=shared_state)
     scan_completed = utc_now()
+
+    publisher = ScannerPublisher()
+    result = publisher.publish(candidates)
 
     live = len(result.live_signals)
     caution = len(result.caution_signals)
