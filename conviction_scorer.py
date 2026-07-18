@@ -6,6 +6,13 @@ Feed threshold labels (S/A) are filter names only, not signal labels.
 
 Bonus system: offensive + defensive premium stacking, capped at 3.0×.
 Canonical signal output: score_8, action_state, action_reason per contract v1.
+
+V2 additions (2026-07-18):
+  - FAKEOUT_PROBABILITY wired into defensive score as secondary penalty
+  - OB_QUALITY from microstructure OB classifier wired into _ob_proximity()
+  - FVG path score fused into _inefficiency_path()
+  - Edge multiplier patch: 3 additional MTF band rules
+    (-0.04 if trap>=0.70, -0.03 if reclaim<0.45, +0.02 if leadership>=0.80)
 """
 
 from __future__ import annotations
@@ -172,8 +179,35 @@ class ConvictionScorer:
 
     @staticmethod
     def _ob_proximity(sig: Dict[str, Any]) -> float:
-        """Order-block / structure proximity — 1.0 = at OB, 0.5 = unknown."""
-        return _sf(sig.get("ob_proximity", sig.get("order_block_proximity")), 0.5)
+        """Order-block / structure proximity — 1.0 = at OB, 0.5 = unknown.
+
+        V2: if microstructure OB classifier ran, blend ob_quality + ob_distance
+        for a richer reading than a raw proximity float.
+        """
+        # Prefer explicit field from engine
+        if "ob_proximity" in sig:
+            return _sf(sig["ob_proximity"])
+        if "order_block_proximity" in sig:
+            return _sf(sig["order_block_proximity"])
+        # Use SMC OB classifier output if present
+        if sig.get("ob_detected"):
+            quality  = _sf(sig.get("ob_quality"), 0.5)
+            distance = _sf(sig.get("ob_distance"), 0.5)   # 0 = at OB, 1 = far
+            # High quality + low distance = high score
+            proximity = quality * 0.6 + (1.0 - distance) * 0.4
+            if sig.get("ob_mitigated"):
+                proximity *= 0.55   # mitigated OB is stale
+            return round(float(proximity), 3)
+        return 0.50   # unknown
+
+    # ── Fakeout probability (defensive secondary penalty) ───────────────────
+    @staticmethod
+    def _fakeout_probability(sig: Dict[str, Any]) -> float:
+        """0-1. Higher = move already showed failure signals.
+        This is distinct from trap_risk: trap is about terrain, fakeout is about
+        the move itself dying — no follow-through, reversal into impulse body.
+        """
+        return _sf(sig.get("fakeout_probability"), 0.0)
 
     # ── Defensive sub-scores ──────────────────────────────────────────────────
     @staticmethod
@@ -240,8 +274,23 @@ class ConvictionScorer:
 
     @staticmethod
     def _inefficiency_path(sig: Dict[str, Any]) -> float:
-        if "inefficiency_path" in sig:
+        """Path cleanliness 0-1.
+
+        V2: fuse swing obstacle path score with FVG path score when both are
+        present. FVGs in path are real friction — they will get filled before
+        price reaches TP.
+        """
+        # Both micro scores present — blend them
+        has_path = "inefficiency_path" in sig
+        has_fvg  = "fvg_path_score" in sig
+        if has_path and has_fvg:
+            swing = _sf(sig["inefficiency_path"])
+            fvg   = _sf(sig["fvg_path_score"])
+            return round(swing * 0.55 + fvg * 0.45, 3)
+        if has_path:
             return _sf(sig["inefficiency_path"])
+        if has_fvg:
+            return _sf(sig["fvg_path_score"])
         # Proxy: clean R:R beyond 2.5 = cleaner air
         try:
             rr = float(sig.get("rr", 2.0))
@@ -278,8 +327,11 @@ class ConvictionScorer:
             w["stop_hunt_recovery"]  * self._stop_hunt_recovery(sig) +
             w["absorption_strength"] * self._absorption_strength(sig)
         )
-        penalty = w["trap_risk_penalty"] * self._trap_risk(sig)
-        raw = pos - penalty
+        trap_penalty    = w["trap_risk_penalty"] * self._trap_risk(sig)
+        # FAKEOUT secondary penalty: scales inside trap_risk_penalty weight (max 50% of it)
+        # Fakeout caps at 0.5× trap_risk_penalty so it can't double-kill alone
+        fakeout_penalty = (w["trap_risk_penalty"] * 0.50) * self._fakeout_probability(sig)
+        raw = pos - trap_penalty - fakeout_penalty
         # Normalize to 0-1 band
         max_possible = w["liq_sweep_quality"] + w["stop_hunt_recovery"] + w["absorption_strength"]
         return max(0.0, min(raw / max_possible if max_possible > 0 else 0.5, 1.0))
@@ -453,11 +505,23 @@ class ConvictionScorer:
         base += self._fg_modifier(signal)
         base = max(0.0, min(base, 1.0))
 
-        # MTF multiplier
+        # MTF multiplier — base band
         mtf  = str(signal.get("mtf_alignment", "PARTIAL")).upper()
         mult = MTF_MULTIPLIERS.get(mtf, 1.00)
         if not regime_ok:
             mult *= 0.80  # regime mismatch penalty, not kill
+
+        # ── Edge multiplier patch — 3 additional rules clamped to 0.85-1.15 ──
+        # Rule 1: high trap risk inside the MTF band → cut the multiplier
+        if trap >= 0.70:
+            mult = max(mult - 0.04, 0.85)
+        # Rule 2: failed reclaim (move looks fake even after the structure break)
+        reclaim_ratio = _sf(signal.get("reclaim_close_ratio"), 0.5)
+        if reclaim_ratio < 0.45:
+            mult = max(mult - 0.03, 0.85)
+        # Rule 3: pair is a leader in ATR/volume → small edge premium
+        if self._relative_leadership(signal) >= 0.80:
+            mult = min(mult + 0.02, 1.15)
 
         after_mtf = min(base * mult, 1.0)
 
