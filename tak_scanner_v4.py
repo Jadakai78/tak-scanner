@@ -177,20 +177,21 @@ def build_bus_payload(result, fg, regime, pair_rows, scan_started, scan_complete
             if intent not in {"ATTACK","ATTACKBREAK","ATTACK_TRAP"} or conviction < 75:
                 continue
 
-            # Build entry/stop/target from available levels
-            entry  = float(rts.get("entry_idea", rts.get("entry", 0)) or 0)
-            sl     = float(rts.get("stop_idea",  rts.get("sl", rts.get("kill_level", 0))) or 0)
-            tp     = float(rts.get("target_idea", rts.get("tp", 0)) or 0)
+            # RTS engines use build_signal — keys are entry/sl/tp directly
+            # Fallback chain handles any engine that returns raw levels instead
+            entry  = float(rts.get("entry", rts.get("entry_idea", 0)) or 0)
+            sl     = float(rts.get("sl", rts.get("stop_idea", rts.get("kill_level", 0))) or 0)
+            tp     = float(rts.get("tp", rts.get("target_idea", 0)) or 0)
             atr_v  = float(rts.get("atr", 0) or 0)
 
-            # Use current bar as entry if not set
+            # Use current bar close as entry if build_signal didn't set it
             bar = bar_map.get(pair_key, {})
             if entry == 0:
                 entry = float(bar.get("close", 0))
 
-            # Build sl from bos_level / zone / kill_level if not set
+            # Build sl from structural levels if missing
             if sl == 0:
-                for field in ("bos_level","zone_low","zone_high","liq_level","flip_level"):
+                for field in ("bos_level","choch_level","zone_top","zone_bottom","liq_level","flip_level","kill_level"):
                     v = float(rts.get(field, 0) or 0)
                     if v > 0:
                         sl = v * (0.999 if bias=="LONG" else 1.001)
@@ -198,7 +199,7 @@ def build_bus_payload(result, fg, regime, pair_rows, scan_started, scan_complete
                 if sl == 0 and atr_v > 0:
                     sl = entry - 1.5*atr_v if bias=="LONG" else entry + 1.5*atr_v
 
-            # Build tp — 2.5R minimum, or use existing
+            # Build tp at 2.5R if missing
             if tp == 0 and sl > 0 and entry > 0:
                 risk = abs(entry - sl)
                 tp = entry + 2.5*risk if bias=="LONG" else entry - 2.5*risk
