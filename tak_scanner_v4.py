@@ -7,7 +7,7 @@ from typing import Any, Dict, List
 from scannermodels import PairContext, ScanResult
 from scannerorchestrator import ScannerOrchestrator
 from scannerpublisher import ScannerPublisher
-from signalbus.bus_writer import SignalBusWriter
+from signalbusbus_writer import SignalBusWriter  # flat file — no signalbus/ package
 
 logger = logging.getLogger("tak_scanner_v4")
 
@@ -28,28 +28,26 @@ def run_scan(
 ) -> ScanResult:
     """
     Main Tak v4 scan entrypoint.
-
     - Takes prepared PairContext objects.
     - Runs orchestrator + publisher.
     - Fills canonical audit keys.
-    - Writes signal bus payload to disk via SignalBusWriter.
+    - Writes signal bus payload to signal_bus.json via SignalBusWriter.
     """
     scan_started_at = utc_now_iso()
 
     orchestrator = ScannerOrchestrator(specialist_registry=specialist_registry)
     publisher = ScannerPublisher()
-    bus_writer = SignalBusWriter()
+    # Write to signal_bus.json at root — matches server.py's SIGNAL_BUS path
+    bus_writer = SignalBusWriter(output_path="signal_bus.json")
 
     shared_state: Dict[str, Any] = {
-        "fgscore": None,           # fill if you have Fear & Greed
+        "fgscore": None,
         "market_phase": market_phase,
         "timeframe": timeframe,
     }
 
-    # Orchestrate per-pair specialists → CandidateSignal list
     candidates = orchestrator.run(pair_contexts, shared_state=shared_state)
 
-    # Publish into ScanResult (signals + positions + audit shell)
     audit: Dict[str, Any] = {}
     positions: List[Dict[str, object]] = []
 
@@ -59,7 +57,6 @@ def run_scan(
         audit=audit,
     )
 
-    # Fill canonical audit keys for schema
     _fill_audit(
         result=result,
         scan_started_at=scan_started_at,
@@ -73,7 +70,6 @@ def run_scan(
         market_phase=market_phase,
     )
 
-    # Write bus payload (signalbus.json) using canonical schema
     payload = bus_writer.write(result)
     logger.info(
         "Tak v4 scan complete pairs=%s live=%s caution=%s killed=%s",
@@ -97,11 +93,8 @@ def _fill_audit(
     regime_map: Dict[str, Any],
     market_phase: str | None,
 ) -> None:
-    """
-    Fill ScanResult.audit with the canonical keys the schema expects.
-    """
+    """Fill ScanResult.audit with canonical keys the schema expects."""
     audit = result.audit
-
     active_pairs = [ctx.pair for ctx in pair_contexts]
 
     # Session
@@ -123,9 +116,7 @@ def _fill_audit(
     audit["global_regime"] = dict(global_regime or {})
     audit["regime_map"] = dict(regime_map or {})
 
-    # Diagnostics placeholders
+    # Diagnostics
     audit.setdefault("route_stats", {})
     audit.setdefault("field_general", {})
-
-    # Counts are already set by publisher; keep them if present
-    audit.setdefault("counts", audit.get("counts", {}))
+    audit.setdefault("counts", {})
