@@ -25,10 +25,10 @@ logging.basicConfig(
 )
 logger = logging.getLogger("strategies.s4")
 
-RSI_OS = 35
-RSI_OB = 65
+RSI_OS = 30              # loosened from 35 — dynamic scorer handles quality
+RSI_OB = 70              # loosened from 65
 SMC_TOLERANCE = 0.01       # within 1% of a recent swing
-OVEREXTENSION = 0.02       # >2% beyond EMA50
+OVEREXTENSION = 0.03       # >3% beyond EMA50 (crypto needs room)
 
 
 class S4MeanReversion:
