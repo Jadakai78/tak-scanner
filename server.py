@@ -1,5 +1,5 @@
-# server.py — JHL Holdings live signal API + optional feed redirect
-from flask import Flask, jsonify, redirect
+# server.py — JHL Holdings live signal API + terminal feed server
+from flask import Flask, jsonify, send_file, redirect
 from flask_cors import CORS
 import json
 from pathlib import Path
@@ -8,8 +8,9 @@ from datetime import datetime, timezone
 app = Flask(__name__)
 CORS(app)
 
-SIGNAL_BUS = Path(__file__).resolve().parent / "signal_bus.json"
-FEED_URL = "https://jhl-signal-bus.blazing0478.workers.dev"
+BASE = Path(__file__).resolve().parent
+SIGNAL_BUS = BASE / "signal_bus.json"
+CF_WORKER_URL = "https://jhl-signal-bus.blazing0478.workers.dev"
 
 ACCOUNTS = [
     {"account_id": "eval_4_25k",    "name": "Eval 4 $25K DRAGON",  "recommended_risk_per_trade": 177.0},
@@ -20,13 +21,15 @@ ACCOUNTS = [
 
 
 def load_signal_bus():
+    """Load bus from local file first, fall back to CF worker KV endpoint."""
     try:
         data = json.loads(SIGNAL_BUS.read_text())
-    except FileNotFoundError:
+    except (FileNotFoundError, json.JSONDecodeError):
         import urllib.request
-        with urllib.request.urlopen(FEED_URL, timeout=10) as resp:
+        with urllib.request.urlopen(f"{CF_WORKER_URL}/api/signals", timeout=10) as resp:
             data = json.loads(resp.read().decode("utf-8"))
 
+    # Inject account data
     baselines = data.get("session_baselines", {})
     accounts = []
     for acct in ACCOUNTS:
@@ -40,10 +43,11 @@ def load_signal_bus():
             "recommended_risk_per_trade": acct["recommended_risk_per_trade"],
             "mode": "FULL_AGGRESSION",
         })
-
     data["accounts"] = accounts
     return data
 
+
+# ── API routes ──────────────────────────────────────────────────────────────
 
 @app.route("/api/signals")
 def signals():
@@ -63,11 +67,50 @@ def health():
     })
 
 
+# ── Static / feed serving ───────────────────────────────────────────────────
+
 @app.route("/")
-@app.route("/index-2.html")
 @app.route("/index.html")
 def feed():
-    return redirect(FEED_URL)
+    terminal = BASE / "jhl-live-terminal.html"
+    if terminal.exists():
+        return send_file(terminal)
+    # fallback to old worker feed
+    return redirect(CF_WORKER_URL)
+
+
+@app.route("/jhl-snapshot-adapter.module.js")
+def adapter():
+    f = BASE / "jhl-snapshot-adapter.module.js"
+    if f.exists():
+        return send_file(f, mimetype="application/javascript")
+    return "Not found", 404
+
+
+@app.route("/manifest.webmanifest")
+def manifest():
+    f = BASE / "manifest.webmanifest"
+    if f.exists():
+        return send_file(f, mimetype="application/manifest+json")
+    return "Not found", 404
+
+
+@app.route("/sw.js")
+def sw():
+    f = BASE / "sw.js"
+    if f.exists():
+        return send_file(f, mimetype="application/javascript")
+    return "Not found", 404
+
+
+@app.route("/icon-192.png")
+def icon192():
+    return send_file(BASE / "icon-192.png") if (BASE / "icon-192.png").exists() else ("", 404)
+
+
+@app.route("/icon-512.png")
+def icon512():
+    return send_file(BASE / "icon-512.png") if (BASE / "icon-512.png").exists() else ("", 404)
 
 
 if __name__ == "__main__":
