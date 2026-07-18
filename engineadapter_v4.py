@@ -1,110 +1,107 @@
-"""engineadapter_v4.py — Bridges legacy generate(pair, ohlc_df, regime, fg_score)
-specialists into the ScannerOrchestrator's observe(context, shared_state) contract.
-"""
+"""engineadapter_v4.py — bridges legacy specialist generate() to orchestrator observe()."""
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, Optional
+from typing import Any, Dict
 
-from scannermodels import PairContext, SpecialistObservation
+import pandas as pd
 
-logger = logging.getLogger("engineadapter_v4")
+logger = logging.getLogger("engineadapterv4")
+
+REGIME_ALLOWED: Dict[str, list] = {
+    "S1":  ["TREND_UP", "TRENDUP", "TREND_DOWN", "TRENDDOWN"],
+    "S2":  ["TREND_UP", "TRENDUP", "TREND_DOWN", "TRENDDOWN"],
+    "S3":  ["VOLATILE",  "TREND_DOWN", "TRENDDOWN", "TREND_UP", "TRENDUP"],
+    "S4":  ["RANGE"],
+    "S5":  ["TREND_UP", "TRENDUP", "TREND_DOWN", "TRENDDOWN"],
+    "S6":  ["RANGE", "FEAR", "TREND_DOWN", "TRENDDOWN"],
+    "S7":  ["RANGE"],
+    "S9":  ["FEAR", "TREND_DOWN", "TRENDDOWN"],
+    "S10": ["RANGE", "VOLATILE", "FEAR", "TREND_DOWN", "TRENDDOWN"],
+}
+
+OHLC_COLS = ["timestamp", "open", "high", "low", "close", "vwap", "volume", "count"]
+
+
+def _parse_ohlc(raw) -> pd.DataFrame | None:
+    """Convert ohlc_4h (list of lists) or existing DataFrame to a labeled DataFrame."""
+    if raw is None:
+        return None
+    if isinstance(raw, pd.DataFrame):
+        return raw
+    try:
+        rows = list(raw)
+        if not rows:
+            return None
+        # Kraken OHLC row: [timestamp, open, high, low, close, vwap, volume, count]
+        ncols = len(rows[0]) if rows else 0
+        cols = OHLC_COLS[:ncols]
+        df = pd.DataFrame(rows, columns=cols)
+        for col in ["open", "high", "low", "close", "volume"]:
+            if col in df.columns:
+                df[col] = pd.to_numeric(df[col], errors="coerce")
+        return df
+    except Exception as exc:
+        logger.debug("OHLC parse failed: %s", exc)
+        return None
 
 
 class EngineSpecialistAdapter:
-    """Wraps a legacy engine (with .generate()) so the orchestrator can call
-    .observe(context, shared_state) on it uniformly.
+    """Wrap a legacy engine specialist so the orchestrator can call observe()."""
 
-    Supported engine call patterns (tried in order):
-      1. engine.generate(pair, ohlc_df, regime, fg_score, ai_st=...)
-      2. engine.generate(pair=pair, ohlc_df=ohlc_df, regime=regime, fg_score=fg_score)
-      3. engine.score_mtf(pair, bias, ohlc_4h, pair_key=...) — S8 overlay
-    """
-
-    def __init__(
-        self,
-        name: str,
-        engine: Any,
-        supported_regimes: list[str] | None = None,
-    ) -> None:
-        self.name = name
+    def __init__(self, name: str, engine: Any) -> None:
+        self.name   = name
         self.engine = engine
-        # Allow engine to declare its own regimes; fall back to param
-        self.supported_regimes = (
-            getattr(engine, "REQUIRED_REGIMES", None)
-            or getattr(engine, "supported_regimes", None)
-            or supported_regimes
-            or ["*"]
+
+    def observe(self, context: Any, shared_state: Dict[str, Any]) -> Any:
+        pair    = getattr(context, "pair", "UNKNOWN")
+        regime  = getattr(context, "market_regime", "unknown")
+        fg_score = shared_state.get("fgscore", 50)
+
+        # Regime gate
+        allowed = REGIME_ALLOWED.get(self.name, [])
+        if allowed and regime.upper() not in [r.upper() for r in allowed]:
+            return None
+
+        # Resolve OHLC: metadata["ohlc_4h"] is a list of lists from analyze_pair
+        metadata = getattr(context, "metadata", {}) or {}
+        indicators = getattr(context, "indicators", {}) or {}
+
+        raw_ohlc = (
+            metadata.get("ohlc_4h")
+            or indicators.get("ohlc_df")
+            or indicators.get("ohlc_4h")
         )
+        ohlc_df = _parse_ohlc(raw_ohlc)
 
-    def observe(
-        self,
-        context: PairContext,
-        shared_state: Dict[str, Any],
-    ) -> SpecialistObservation | None:
-        pair = context.pair
-        regime = context.market_regime or "UNKNOWN"
-        fg_score = int(shared_state.get("fgscore") or 50)
-        ai_st = shared_state.get("ai_st") or context.indicators.get("ai_st")
-        ohlc_df = context.indicators.get("ohlc_df") or context.market_state.get("ohlc_df")
+        if ohlc_df is None or len(ohlc_df) < 14:
+            logger.debug("%s skipped %s — no OHLC (%s rows)", self.name, pair,
+                         len(ohlc_df) if ohlc_df is not None else "None")
+            return None
 
-        # Check regime eligibility
-        if self.supported_regimes and "*" not in self.supported_regimes and "ALL" not in self.supported_regimes:
-            if regime.upper() not in {r.upper() for r in self.supported_regimes}:
-                return None
-
-        raw: Optional[Dict[str, Any]] = None
-        try:
-            raw = self.engine.generate(pair, ohlc_df, regime, fg_score, ai_st=ai_st)
-        except TypeError:
-            # Try keyword-only form
+        # Try calling the underlying engine
+        for method_name in ("generate", "observe", "scan", "run"):
+            method = getattr(self.engine, method_name, None)
+            if method is None:
+                continue
             try:
-                raw = self.engine.generate(
-                    pair=pair, ohlc_df=ohlc_df, regime=regime, fg_score=fg_score
-                )
+                if method_name == "generate":
+                    return method(pair, ohlc_df, regime, fg_score)
+                elif method_name in ("observe",):
+                    return method(context=context, shared_state=shared_state)
+                else:
+                    return method(context=context, shared_state=shared_state)
             except TypeError:
-                logger.debug("Adapter %s: generate() signature mismatch for %s", self.name, pair)
+                try:
+                    return method(pair, ohlc_df, regime, fg_score)
+                except Exception as exc:
+                    logger.warning("%s.%s fallback failed for %s: %s",
+                                   self.name, method_name, pair, exc)
+                    return None
+            except Exception as exc:
+                logger.warning("%s.%s failed for %s: %s",
+                               self.name, method_name, pair, exc)
                 return None
-        except Exception as exc:
-            logger.warning("Adapter %s: generate() raised for %s: %s", self.name, pair, exc)
-            return None
 
-        if raw is None:
-            return None
-
-        return self._to_observation(raw, pair, regime)
-
-    def _to_observation(
-        self, raw: Dict[str, Any], pair: str, regime: str
-    ) -> SpecialistObservation:
-        confidence = float(raw.get("confidence", raw.get("score", 0.5)))
-        if confidence > 1.0:
-            confidence = confidence / 100.0
-        confidence = max(0.0, min(1.0, confidence))
-
-        score = float(raw.get("score", confidence * 100.0))
-        score = max(0.0, min(100.0, score))
-
-        evidence = dict(raw.get("evidence", {}))
-        # Pull trade plan fields up from raw if not nested in evidence
-        for field in ("entry_idea", "stop_idea", "target_idea", "rr", "entry", "sl", "tp"):
-            if field not in evidence and field in raw:
-                evidence[field] = raw[field]
-
-        ctx = dict(raw.get("context", {}))
-        ctx.setdefault("regime", regime)
-        ctx.setdefault("timeframe", raw.get("timeframe", "4h"))
-
-        return SpecialistObservation(
-            specialist=self.name,
-            pair=pair,
-            setup_type=str(raw.get("setup_type", raw.get("engine", self.name))),
-            side=str(raw.get("side", raw.get("bias", "NEUTRAL"))),
-            confidence=confidence,
-            score=score,
-            thesis=str(raw.get("thesis", "")),
-            evidence=evidence,
-            warnings=list(raw.get("warnings", [])),
-            tags=list(raw.get("tags", [])),
-            context=ctx,
-        )
+        logger.warning("%s: no callable method found on %s", self.name, type(self.engine).__name__)
+        return None
