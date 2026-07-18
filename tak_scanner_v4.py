@@ -12,6 +12,7 @@ import urllib.error
 import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
+from alerts import fire_alerts
 from typing import Any, Dict, List
 
 logging.basicConfig(
@@ -477,6 +478,18 @@ def run():
                                       scan_started, scan_completed, False)
     payload_bytes = json.dumps(payload, ensure_ascii=False, indent=2).encode("utf-8")
     SIGNAL_BUS_PATH.write_bytes(payload_bytes)
+
+    # 7b. Fire alerts — Telegram + Pushover + Outlook + Yahoo
+    # Only fire on signals that passed all gates (live + caution + rts promoted)
+    try:
+        alertable = [s for s in all_signals if s.get("december_verdict") not in ("EXPIRED","REJECT","WAIT")]
+        if alertable:
+            fire_alerts(alertable, sprint_mode=False)
+            logger.info("fire_alerts dispatched %d signal(s)", len(alertable))
+        else:
+            logger.info("fire_alerts — no alertable signals this cycle")
+    except Exception as _alert_err:
+        logger.warning("fire_alerts error (non-fatal): %s", _alert_err)
 
     # 8. Push to CF KV
     ok = push_to_cf(payload_bytes)
