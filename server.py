@@ -204,6 +204,26 @@ def position_execute():
         return jsonify({"ok": False, "error": str(exc)}), 500
 
 
+@app.route("/api/position/wait", methods=["POST"])
+def position_wait():
+    """Human marks a signal WAIT — valid setup, holding for better entry timing."""
+    from flask import request as freq
+    body = freq.get_json(silent=True) or {}
+    pair = body.get("pair", "")
+    if not pair:
+        return jsonify({"ok": False, "error": "pair required"}), 400
+    try:
+        bus = json.loads(SIGNAL_BUS.read_text())
+        for sig in bus.get("signals", []):
+            if sig.get("pair") == pair:
+                sig["december_verdict"] = "WAIT"
+                sig["wait_at"] = datetime.now(timezone.utc).isoformat()
+        SIGNAL_BUS.write_bytes(json.dumps(bus, ensure_ascii=False, indent=2).encode())
+        return jsonify({"ok": True, "pair": pair, "verdict": "WAIT"})
+    except Exception as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 500
+
+
 @app.route("/api/position/reject", methods=["POST"])
 def position_reject():
     """Human rejects a signal — flips december_verdict to REJECT."""
