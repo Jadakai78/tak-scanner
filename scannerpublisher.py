@@ -2,7 +2,17 @@ from __future__ import annotations
 
 from typing import Any, Dict, Iterable, List
 
-from scannermodels import CandidateSignal, PublishedSignal, ScanResult
+from scannermodels import (
+    CandidateSignal,
+    PublishedSignal,
+    ScanResult,
+    CommonIndicatorContext,
+    ExecutionContext,
+    ClaimContext,
+    SignalDiagnostics,
+    ClaimScore,
+    ToolCheck,
+)
 
 
 class ScannerPublisher:
@@ -12,6 +22,10 @@ class ScannerPublisher:
         positions: List[Dict[str, object]] | None = None,
         audit: Dict[str, object] | None = None,
     ) -> ScanResult:
+        """
+        Convert reviewed + adjudicated CandidateSignal objects into a ScanResult,
+        grouping into live / caution / killed buckets and attaching positions + audit.
+        """
         result = ScanResult(
             positions=list(positions or []),
             audit=dict(audit or {}),
@@ -28,14 +42,25 @@ class ScannerPublisher:
             else:
                 result.killed_signals.append(published)
 
-        result.audit.setdefault("counts", {})
-        result.audit["counts"]["live_signals"] = len(result.live_signals)
-        result.audit["counts"]["caution_signals"] = len(result.caution_signals)
-        result.audit["counts"]["killed_signals"] = len(result.killed_signals)
-        result.audit["counts"]["positions"] = len(result.positions)
+        # Basic counts for downstream diagnostics and website summary
+        counts = result.audit.setdefault("counts", {})
+        counts["live_signals"] = len(result.live_signals)
+        counts["caution_signals"] = len(result.caution_signals)
+        counts["killed_signals"] = len(result.killed_signals)
+        counts["positions"] = len(result.positions)
+
         return result
 
     def _to_published(self, candidate: CandidateSignal) -> PublishedSignal:
+        """
+        Merge candidate + review + council into a PublishedSignal.
+
+        - Uses Remi-adjusted score when available.
+        - Uses Council route + execution_ready when available.
+        - Builds both:
+          - canonical payload dict (for schema/website), and
+          - typed helper contexts (indicators, execution, claims, diagnostics).
+        """
         review = candidate.review
         council = candidate.council
 
@@ -45,6 +70,12 @@ class ScannerPublisher:
 
         merged_context = self._build_context(candidate)
         payload = self._build_payload(candidate, merged_context)
+
+        # Typed helpers for internal use, tests, and future modules
+        indicators_ctx = self._build_indicators_context(merged_context)
+        execution_ctx = self._build_execution_context(candidate, merged_context)
+        claims_ctx = self._build_claims_context(candidate, merged_context)
+        diagnostics_ctx = self._build_diagnostics_context(candidate, merged_context, payload)
 
         return PublishedSignal(
             bucket=route,
@@ -64,7 +95,13 @@ class ScannerPublisher:
             payload=payload,
             review=review,
             council=council,
+            indicators=indicators_ctx,
+            execution=execution_ctx,
+            claims=claims_ctx,
+            diagnostics=diagnostics_ctx,
         )
+
+    # --- Payload + context builders (canonical contract) ---
 
     def _build_payload(
         self,
@@ -86,17 +123,24 @@ class ScannerPublisher:
     def _build_context(self, candidate: CandidateSignal) -> Dict[str, Any]:
         base = dict(candidate.context)
 
+        # Core identity / state
         base.setdefault("timeframe", "1h")
         base.setdefault("status", candidate.final_status)
         base.setdefault("confidence", candidate.confidence)
         base.setdefault("market_regime", base.get("regime", "unknown"))
 
+        # Common indicator layer
         base.setdefault("trend_context", self._extract_trend_context(base))
         base.setdefault("st_context", self._extract_st_context(base))
         base.setdefault("volume_context", self._extract_volume_context(base))
         base.setdefault("volatility_context", self._extract_volatility_context(base))
         base.setdefault("structure_context", self._extract_structure_context(base))
 
+        base.setdefault("mtf_verdict", base.get("mtf_verdict"))
+        base.setdefault("mtf_score", base.get("mtf_score"))
+        base.setdefault("mtf_alignment", base.get("mtf_alignment"))
+
+        # Execution layer
         base.setdefault("rr_estimate", self._estimate_rr(candidate))
         base.setdefault("offensive_score", base.get("offensive_score"))
         base.setdefault("defensive_score", base.get("defensive_score"))
@@ -108,6 +152,7 @@ class ScannerPublisher:
         base.setdefault("target_basis", base.get("target_basis"))
         base.setdefault("cut_now", base.get("cut_now", False))
 
+        # Claim layer
         base.setdefault("attached_bots", [candidate.specialist])
         base.setdefault("lead_bot", candidate.specialist)
         base.setdefault("co_claims", [])
@@ -115,6 +160,8 @@ class ScannerPublisher:
         base.setdefault("claim_scores", [])
         base.setdefault("tool_checks", [])
         base.setdefault("common_indicator_ok", base.get("common_indicator_ok"))
+        base.setdefault("mission_fit", base.get("mission_fit"))
+        base.setdefault("survival_ok", base.get("survival_ok"))
 
         return base
 
@@ -158,6 +205,8 @@ class ScannerPublisher:
             "claim_scores": list(context.get("claim_scores", [])),
             "tool_checks": list(context.get("tool_checks", [])),
             "common_indicator_ok": context.get("common_indicator_ok"),
+            "mission_fit": context.get("mission_fit"),
+            "survival_ok": context.get("survival_ok"),
         }
 
     def _build_execution(
@@ -180,6 +229,105 @@ class ScannerPublisher:
             "target_basis": context.get("target_basis"),
             "cut_now": context.get("cut_now", False),
         }
+
+    # --- Typed helper context builders ---
+
+    def _build_indicators_context(self, context: Dict[str, Any]) -> CommonIndicatorContext:
+        return CommonIndicatorContext(
+            market_regime=context.get("market_regime"),
+            timeframe=context.get("timeframe"),
+            mtf_verdict=context.get("mtf_verdict"),
+            mtf_score=context.get("mtf_score"),
+            mtf_alignment=context.get("mtf_alignment"),
+            trend_context=self._build_trend_context(context),
+            st_context=self._build_st_context(context),
+            volume_context=self._build_volume_context(context),
+            volatility_context=self._build_volatility_context(context),
+            structure_context=self._build_structure_context(context),
+            extra={},
+        )
+
+    def _build_execution_context(
+        self,
+        candidate: CandidateSignal,
+        context: Dict[str, Any],
+    ) -> ExecutionContext:
+        return ExecutionContext(
+            entry_idea=candidate.entry_idea,
+            stop_idea=candidate.stop_idea,
+            target_idea=candidate.target_idea,
+            rr_estimate=context.get("rr_estimate"),
+            offensive_score=context.get("offensive_score"),
+            defensive_score=context.get("defensive_score"),
+            trap_risk=context.get("trap_risk"),
+            survivability=context.get("survivability"),
+            liquidity_proximity=context.get("liquidity_proximity"),
+            execution_intent=context.get("execution_intent"),
+            invalidation_basis=context.get("invalidation_basis"),
+            target_basis=context.get("target_basis"),
+            cut_now=context.get("cut_now", False),
+        )
+
+    def _build_claims_context(
+        self,
+        candidate: CandidateSignal,
+        context: Dict[str, Any],
+    ) -> ClaimContext:
+        # Convert any dict-like score/check objects into typed ClaimScore / ToolCheck if present
+        raw_scores = context.get("claim_scores") or []
+        claim_scores: List[ClaimScore] = []
+        for item in raw_scores:
+            if isinstance(item, dict):
+                claim_scores.append(
+                    ClaimScore(
+                        bot=item.get("bot", candidate.specialist),
+                        score=float(item.get("score", 0.0)),
+                        threshold=item.get("threshold"),
+                        lead_threshold=item.get("lead_threshold"),
+                        outcome=item.get("outcome"),
+                    )
+                )
+
+        raw_checks = context.get("tool_checks") or []
+        tool_checks: List[ToolCheck] = []
+        for item in raw_checks:
+            if isinstance(item, dict):
+                tool_checks.append(
+                    ToolCheck(
+                        name=item.get("name", ""),
+                        required=bool(item.get("required", True)),
+                        available=bool(item.get("available", False)),
+                        note=item.get("note", ""),
+                    )
+                )
+
+        return ClaimContext(
+            lead_bot=context.get("lead_bot", candidate.specialist),
+            attached_bots=list(context.get("attached_bots", [candidate.specialist])),
+            co_claims=list(context.get("co_claims", [])),
+            claim_status=context.get("claim_status"),
+            claim_scores=claim_scores,
+            tool_checks=tool_checks,
+            common_indicator_ok=context.get("common_indicator_ok"),
+            mission_fit=context.get("mission_fit"),
+            survival_ok=context.get("survival_ok"),
+        )
+
+    def _build_diagnostics_context(
+        self,
+        candidate: CandidateSignal,
+        context: Dict[str, Any],
+        payload: Dict[str, Any],
+    ) -> SignalDiagnostics:
+        return SignalDiagnostics(
+            warnings=list(candidate.warnings),
+            tags=list(candidate.tags),
+            raw_context=context,
+            raw_evidence=dict(candidate.evidence),
+            legacy_payload=payload,
+        )
+
+    # --- Context extraction helpers (shared by payload + typed contexts) ---
 
     def _extract_trend_context(self, context: Dict[str, Any]) -> Dict[str, Any]:
         return {
@@ -227,6 +375,62 @@ class ScannerPublisher:
             "target_path": list(context.get("target_path", [])),
             "liquidity_map": list(context.get("liquidity_map", [])),
         }
+
+    # Typed variants built from the same dicts
+
+    def _build_trend_context(self, context: Dict[str, Any]):
+        tc = self._extract_trend_context(context)
+        return TrendContext(
+            ribbon_state=tc.get("ribbon_state"),
+            ribbon_order=list(tc.get("ribbon_order") or []),
+            ribbon_slope=tc.get("ribbon_slope"),
+            compression_state=tc.get("compression_state"),
+            expansion_state=tc.get("expansion_state"),
+            reclaim_status=tc.get("reclaim_status"),
+        )
+
+    def _build_st_context(self, context: Dict[str, Any]):
+        sc = self._extract_st_context(context)
+        return SupertrendContext(
+            direction=sc.get("direction"),
+            line_distance=sc.get("line_distance"),
+            strength=sc.get("strength"),
+            phase=sc.get("phase"),
+            flip_risk=sc.get("flip_risk"),
+        )
+
+    def _build_volume_context(self, context: Dict[str, Any]):
+        vc = self._extract_volume_context(context)
+        return VolumeContext(
+            relative_volume=vc.get("relative_volume"),
+            participation_grade=vc.get("participation_grade"),
+            spike_state=vc.get("spike_state"),
+            quiet_pullback=vc.get("quiet_pullback"),
+            delta_state=vc.get("delta_state"),
+            cvd_state=vc.get("cvd_state"),
+        )
+
+    def _build_volatility_context(self, context: Dict[str, Any]):
+        vc = self._extract_volatility_context(context)
+        return VolatilityContext(
+            atr_level=vc.get("atr_level"),
+            atr_expansion=vc.get("atr_expansion"),
+            compression_release=vc.get("compression_release"),
+        )
+
+    def _build_structure_context(self, context: Dict[str, Any]):
+        sc = self._extract_structure_context(context)
+        return StructureContext(
+            nearest_swing_high=sc.get("nearest_swing_high"),
+            nearest_swing_low=sc.get("nearest_swing_low"),
+            bos_level=sc.get("bos_level"),
+            choch_level=sc.get("choch_level"),
+            zone_ref=sc.get("zone_ref"),
+            target_path=list(sc.get("target_path") or []),
+            liquidity_map=list(sc.get("liquidity_map") or []),
+        )
+
+    # --- Misc helpers ---
 
     def _estimate_rr(self, candidate: CandidateSignal) -> float | None:
         entry = candidate.entry_idea
