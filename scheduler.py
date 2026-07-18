@@ -14,9 +14,8 @@ RTS_INTERVAL   = 10 * 60
 RTS_TIMEOUT    = 300
 PYTHON         = "python3"
 INTERVAL_SECONDS = 20 * 60   # 20 minutes
-ACTIVE_START_HOUR = 5         # 5 AM CDT
-ACTIVE_END_HOUR   = 22        # 10 PM CDT
 TIMEOUT           = 600       # 10 min max per scan
+# 24/7 — no active window gate
 
 CF_ACCOUNT_ID = "ea17be7c9b13c5f9c1fec378a44e9e39"
 CF_KV_NS_ID   = "e93558412bde4922828325e714bc44d8"
@@ -27,16 +26,6 @@ CF_KV_URL     = (
 )
 SIGNAL_BUS = MODULE_DIR / "signal_bus.json"
 
-
-def is_active_window():
-    try:
-        from zoneinfo import ZoneInfo
-        now = datetime.now(ZoneInfo("America/Chicago"))
-    except Exception:
-        from datetime import timezone, timedelta
-        now = datetime.utcnow().replace(tzinfo=timezone.utc) - timedelta(hours=5)
-        now = now.replace(tzinfo=None)
-    return ACTIVE_START_HOUR <= now.hour < ACTIVE_END_HOUR
 
 
 def push_to_cf():
@@ -118,19 +107,16 @@ def run_rts_sniper():
 
 def run():
     """Main loop — called by server.py daemon thread so Railway runs this
-    without any local machine involvement."""
+    without any local machine involvement. Runs 24/7, no quiet window."""
     logger.info(
-        "JHL Scheduler starting. Scanner: %s | Interval: %d min | Window: %d-%d CDT",
-        SCANNER.name, INTERVAL_SECONDS // 60, ACTIVE_START_HOUR, ACTIVE_END_HOUR,
+        "JHL Scheduler starting 24/7. Scanner: %s | Interval: %d min",
+        SCANNER.name, INTERVAL_SECONDS // 60,
     )
     while True:
-        if is_active_window():
-            run_scan()
-            rts_thread = threading.Thread(target=run_rts_sniper, daemon=True, name="rts-sniper")
-            rts_thread.start()
-            logger.info("RTS Sniper thread launched")
-        else:
-            logger.info("Outside active window — sleeping")
+        run_scan()
+        rts_thread = threading.Thread(target=run_rts_sniper, daemon=True, name="rts-sniper")
+        rts_thread.start()
+        logger.info("RTS Sniper thread launched")
         time.sleep(INTERVAL_SECONDS)
 
 
