@@ -179,13 +179,17 @@ ACCOUNTS = [
 
 
 def load_signal_bus():
-    """Load bus from local file first, fall back to CF worker KV endpoint."""
+    """Load bus from CF KV (primary source of truth) — local disk as fallback only."""
+    import urllib.request
     try:
-        data = json.loads(SIGNAL_BUS.read_text())
-    except (FileNotFoundError, json.JSONDecodeError):
-        import urllib.request
-        with urllib.request.urlopen(f"{CF_WORKER_URL}/api/signals", timeout=10) as resp:
+        with urllib.request.urlopen(f"{CF_WORKER_URL}/api/signals", timeout=8) as resp:
             data = json.loads(resp.read().decode("utf-8"))
+    except Exception:
+        # Fallback: local disk (may be stale on giving-wisdom service)
+        try:
+            data = json.loads(SIGNAL_BUS.read_text())
+        except Exception:
+            data = {"signals": [], "rts_signals": []}
 
     # Inject account data
     baselines = data.get("session_baselines", {})
@@ -273,6 +277,24 @@ def icon512():
 
 # ── Execution endpoints ─────────────────────────────────────────────────────
 
+def _push_verdict_to_kv(bus: dict):
+    """Push updated bus (with verdict changes) back to CF KV so all services see it."""
+    import urllib.request, urllib.error
+    try:
+        payload = json.dumps(bus, ensure_ascii=False, indent=2).encode("utf-8")
+        req = urllib.request.Request(
+            f"{CF_WORKER_URL}/update",
+            data=payload,
+            headers={"Content-Type": "application/json", "X-JHL-Secret": "jhl2025"},
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=8) as resp:
+            return resp.status == 200
+    except Exception as _e:
+        _aging_logger.warning("KV verdict push failed: %s", _e)
+        return False
+
+
 @app.route("/api/position/execute", methods=["POST"])
 def position_execute():
     """Human confirms an A-grade signal — flips december_verdict to CONFIRM."""
@@ -296,6 +318,7 @@ def position_execute():
                 updated = True
         if updated:
             SIGNAL_BUS.write_bytes(json.dumps(bus, ensure_ascii=False, indent=2).encode())
+            _push_verdict_to_kv(bus)
         # Also log to open trades state
         with _kraken_lock:
             _kraken_open_trades[pair] = {
@@ -323,6 +346,7 @@ def position_wait():
                 sig["december_verdict"] = "WAIT"
                 sig["wait_at"] = datetime.now(timezone.utc).isoformat()
         SIGNAL_BUS.write_bytes(json.dumps(bus, ensure_ascii=False, indent=2).encode())
+        _push_verdict_to_kv(bus)
         return jsonify({"ok": True, "pair": pair, "verdict": "WAIT"})
     except Exception as exc:
         return jsonify({"ok": False, "error": str(exc)}), 500
