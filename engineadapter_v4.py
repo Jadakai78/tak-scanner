@@ -105,3 +105,4 @@ class EngineSpecialistAdapter:
 
         logger.warning("%s: no callable method found on %s", self.name, type(self.engine).__name__)
         return None
+# redeploy-trigger: 20260718T025232
