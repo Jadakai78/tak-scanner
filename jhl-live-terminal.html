@@ -135,6 +135,7 @@ function signalCard(s){
   const verdict = safeText(s.december_verdict||'PENDING');
   const isExecuted = verdict==='CONFIRM';
   const isRejected = verdict==='REJECT';
+  const isExpired  = verdict==='EXPIRED';
   const isWaiting = verdict==='WAIT';
   const verdictBadge = isExecuted
     ? `<span class="tag" style="color:var(--success);border-color:var(--success)">LIVE</span>`
@@ -157,7 +158,8 @@ function signalCard(s){
 }
 
 function renderOverview(snapshot){
-  const signals=safeArr(snapshot.signals);
+  // Filter out EXPIRED and REJECT signals — they're dead, don't show
+  const signals=safeArr(snapshot.signals).filter(s=>!['EXPIRED','REJECT'].includes(s.december_verdict));
   document.getElementById('liveSignals').innerHTML=signals.length?signals.map(signalCard).join(''):emptyCard('No live signals in current snapshot.');
   document.getElementById('liveCount').textContent=signals.length;
   const rts=signals.filter(s=>["ATTACK","ATTACKBREAK","ATTACKTRAP"].includes(s.intent));
