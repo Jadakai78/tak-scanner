@@ -18,6 +18,13 @@ REGIME_ALLOWED: Dict[str, list] = {
     "S7":  ["RANGE"],
     "S9":  ["FEAR", "TREND_DOWN", "TRENDDOWN"],
     "S10": ["RANGE", "VOLATILE", "FEAR", "TREND_DOWN", "TRENDDOWN"],
+    # RTS runs in ALL regimes — liquidity sweeps happen everywhere
+    "RTS_LIQ":    [],
+    "RTS_BOS":    [],
+    "RTS_CHOCH":  [],
+    "RTS_ZONE":   [],
+    "RTS_DELTA":  [],
+    "RTS_BOTTLE": [],
 }
 
 OHLC_COLS = ["timestamp", "open", "high", "low", "close", "vwap", "volume", "count"]
@@ -105,4 +112,3 @@ class EngineSpecialistAdapter:
 
         logger.warning("%s: no callable method found on %s", self.name, type(self.engine).__name__)
         return None
-# redeploy-trigger: 20260718T025232
