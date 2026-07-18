@@ -26,9 +26,9 @@ logging.basicConfig(
 )
 logger = logging.getLogger("strategies.s9")
 
-FG_HARD_GATE = 25
-WICK_MIN = 0.55            # lower wick > 55% of range
-VOLUME_SPIKE = 2.5         # >2.5x avg(20)
+FG_HARD_GATE = 30          # widen to 30 — fear at 26-29 is still a cap environment
+WICK_MIN = 0.45            # lower wick > 45% of range (loosened from 55%)
+VOLUME_SPIKE = 1.8         # >1.8x avg(20) — real caps happen 1.8-2.5x, not just 2.5+
 SUPPORT_TOLERANCE = 0.02   # wick low within 2% of a support level
 RECOVERY_UPPER = 0.60      # close in upper 40% => close >= low + 0.6*range
 
