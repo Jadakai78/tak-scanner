@@ -74,12 +74,27 @@ class Remi:
         ohlc_daily: Optional[pd.DataFrame],
         fg_score: int,
         now: Optional[datetime] = None,
+        rts_outputs: Optional[list] = None,
+        current_bar: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         now = now or datetime.now(timezone.utc)
         bias = str(signal.get("bias", "")).upper()
         engine = str(signal.get("engine", "")).upper()
         caution = False
         caution_reason: Optional[str] = None
+
+        # ── Trap gate — RTS kill check FIRST, before all other logic ──
+        if rts_outputs:
+            try:
+                from trap_detector import remi_trap_gate
+                trap_result = remi_trap_gate(signal, rts_outputs, current_bar)
+                if trap_result["status"] == "KILLED":
+                    return self._kill(signal, f"TRAP_DETECTED: {trap_result['reason']}")
+                if trap_result["status"] == "CAUTION":
+                    caution = True
+                    caution_reason = f"TRAP_CAUTION: {trap_result['reason']}"
+            except Exception as exc:
+                logger.warning("Remi trap gate error %s: %s", signal.get("pair"), exc)
 
         # ── Macro window (always caution, never kill) ──────────────────
         if self._macro_window(now):
