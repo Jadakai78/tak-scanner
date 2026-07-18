@@ -14,10 +14,10 @@ from typing import Any, Dict, Optional
 import pandas as pd
 
 try:
-    from ._common import build_signal, ema, rsi, volume_ratio
+    from ._common import build_signal, ema, rsi, volume_ratio, swing_highs, swing_lows, atr
 except ImportError:
     sys.path.insert(0, str(Path(__file__).resolve().parent))
-    from _common import build_signal, ema, rsi, volume_ratio  # type: ignore
+    from _common import build_signal, ema, rsi, volume_ratio, swing_highs, swing_lows, atr  # type: ignore
 
 logging.basicConfig(
     level=logging.INFO,
@@ -91,12 +91,50 @@ class S2TrendRider:
                 return None
 
             entry = last
+            atr_val = atr(df, 14)
+
             if bias == "LONG":
-                sl = float(ai_st.get("lower")) * 0.999
-                tp = entry + (entry - sl) * 2.0
-            else:
-                sl = float(ai_st.get("upper")) * 1.001
-                tp = entry - (sl - entry) * 2.0
+                # SL: tighter of ATR-based or AI ST band — whichever is closer to entry
+                sl_st  = float(ai_st.get("lower")) * 0.999
+                sl_atr = entry - (1.5 * atr_val)
+                sl = max(sl_st, sl_atr)   # max = closer to entry = tighter stop
+                if sl >= entry:
+                    sl = sl_st            # fallback if ATR gives bad result
+
+                # TP: nearest swing high above entry, or ATR projection
+                s_highs = swing_highs(df, left=3, right=3)
+                candidates = [float(df["high"].iloc[i]) for i in s_highs
+                              if float(df["high"].iloc[i]) > entry * 1.005]
+                if candidates:
+                    tp_swing = min(candidates)   # nearest swing high above entry
+                    risk = entry - sl
+                    # Only use swing if it gives ≥ 2.5R — otherwise ATR projection
+                    if risk > 0 and (tp_swing - entry) / risk >= 2.5:
+                        tp = tp_swing
+                    else:
+                        tp = entry + 3.0 * atr_val
+                else:
+                    tp = entry + 3.0 * atr_val
+
+            else:  # SHORT
+                sl_st  = float(ai_st.get("upper")) * 1.001
+                sl_atr = entry + (1.5 * atr_val)
+                sl = min(sl_st, sl_atr)   # min = closer to entry = tighter stop
+                if sl <= entry:
+                    sl = sl_st
+
+                s_lows = swing_lows(df, left=3, right=3)
+                candidates = [float(df["low"].iloc[i]) for i in s_lows
+                              if float(df["low"].iloc[i]) < entry * 0.995]
+                if candidates:
+                    tp_swing = max(candidates)   # nearest swing low below entry
+                    risk = sl - entry
+                    if risk > 0 and (entry - tp_swing) / risk >= 2.5:
+                        tp = tp_swing
+                    else:
+                        tp = entry - 3.0 * atr_val
+                else:
+                    tp = entry - 3.0 * atr_val
 
             return build_signal(
                 pair=pair, bias=bias, engine=self.ENGINE, regime=regime,
