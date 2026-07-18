@@ -116,7 +116,9 @@ def run_rts_sniper():
         logger.error("RTS Sniper failed: %s", exc)
 
 
-if __name__ == "__main__":
+def run():
+    """Main loop — called by server.py daemon thread so Railway runs this
+    without any local machine involvement."""
     logger.info(
         "JHL Scheduler starting. Scanner: %s | Interval: %d min | Window: %d-%d CDT",
         SCANNER.name, INTERVAL_SECONDS // 60, ACTIVE_START_HOUR, ACTIVE_END_HOUR,
@@ -130,3 +132,7 @@ if __name__ == "__main__":
         else:
             logger.info("Outside active window — sleeping")
         time.sleep(INTERVAL_SECONDS)
+
+
+if __name__ == "__main__":
+    run()
