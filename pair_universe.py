@@ -40,8 +40,8 @@ OHLC_URL = f"{KRAKEN_BASE}/OHLC"
 MODULE_DIR = Path(__file__).resolve().parent
 SIGNAL_BUS_PATH = MODULE_DIR / "signal_bus.json"
 
-REQUEST_TIMEOUT = 10  # seconds
-RATE_LIMIT_SLEEP = 1.0  # seconds between OHLC fetches — Kraken rate limit safe
+REQUEST_TIMEOUT = 6   # seconds — tight timeout so failures fail fast during outages
+RATE_LIMIT_SLEEP = 0.8  # seconds between OHLC fetches — Kraken rate limit safe
 
 # Stablecoins to skip — matched against the base asset of the pair.
 STABLECOINS = {
