@@ -27,9 +27,9 @@ logging.basicConfig(
 )
 logger = logging.getLogger("strategies.s6")
 
-LEVEL_TOLERANCE = 0.025     # within 1% of a swing level
-OVEREXTENSION = 0.008      # >1.5% beyond EMA50
-WICK_BODY_MULT = 2.0       # wick must be > 2x body
+LEVEL_TOLERANCE = 0.030     # within 3% of a swing level (was 2.5%)
+OVEREXTENSION = 0.012      # >1.2% beyond EMA50 (was 0.8%)
+WICK_BODY_MULT = 1.5       # wick > 1.5x body (loosened from 2.0 — dynamic scorer rates quality)
 BODY_THIRD = 1.0 / 3.0
 
 
