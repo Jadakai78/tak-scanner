@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import List
 
-from scannermodels import CandidateSignal, RemiReview
+from scannermodels import CandidateSignal, ReviewResult
 
 
 class RemiReviewer:
@@ -16,13 +16,13 @@ class RemiReviewer:
         self.caution_score = caution_score
         self.strong_score = strong_score
 
-    def review(self, candidate: CandidateSignal) -> RemiReview:
+    def review(self, candidate: CandidateSignal) -> ReviewResult:
         score = float(candidate.score)
         confidence_delta = 0.0
         caution_flags: List[str] = []
         evidence_notes: List[str] = []
 
-        if candidate.confidence < 0.55:
+        if (candidate.confidence or 0.0) < 0.55:
             score -= 8.0
             confidence_delta -= 0.05
             caution_flags.append("low_confidence")
@@ -58,7 +58,7 @@ class RemiReviewer:
             caution_flags.append("countertrend")
             evidence_notes.append("Setup is tagged countertrend.")
 
-        if "breakout" in candidate.tags and candidate.confidence >= 0.70:
+        if "breakout" in candidate.tags and (candidate.confidence or 0.0) >= 0.70:
             score += 4.0
             confidence_delta += 0.03
             evidence_notes.append("Breakout with adequate confidence.")
@@ -76,7 +76,7 @@ class RemiReviewer:
             decision = "reject"
             rationale = "Candidate failed minimum REMI quality bar."
 
-        return RemiReview(
+        return ReviewResult(
             decision=decision,
             adjusted_score=round(score, 2),
             confidence_delta=round(confidence_delta, 4),
