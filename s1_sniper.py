@@ -34,7 +34,7 @@ logger = logging.getLogger("strategies.s1")
 
 RETEST_TOLERANCE = 0.005  # within 0.5% of BOS level counts as a retest
 GHOST_PRINT_MAX = 0.60    # retest volume must be < 60% of BOS candle volume
-MIN_SMC_SCORE = 4         # 4/6 minimum SMC criteria
+MIN_SMC_SCORE = 3         # 3/6 minimum SMC criteria (dynamic scoring handles quality)
 
 
 class S1Sniper:
@@ -160,8 +160,10 @@ class S1Sniper:
             "fvg": fvg_present,
         }
         smc_score = sum(1 for v in criteria.values() if v)
+        # Tiered conviction bonus — more confluences = higher quality signal
+        smc_bonus = {3: 0, 4: 5, 5: 12, 6: 20}.get(smc_score, 0)
         if smc_score < MIN_SMC_SCORE:
-            logger.debug("S1 %s SMC score %d/6 < %d", pair, smc_score, MIN_SMC_SCORE)
+            logger.debug("S1 %s SMC score %d/6 < %d — skip", pair, smc_score, MIN_SMC_SCORE)
             return None
 
         structure_quality = (
