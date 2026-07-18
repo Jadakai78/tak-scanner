@@ -26,16 +26,22 @@ class ScannerPairIntake:
                 continue
 
             regime = str(item.get("regime", "")).strip() or self._derive_regime(item)
-            last_price = self._float_or_none(item.get("last_price"))
             metadata = dict(item)
+
+            # Build indicators dict — put ohlc_4h in so adapter can find it
+            ohlc_raw = item.get("ohlc_4h")
+            indicators: dict = {}
+            if ohlc_raw is not None:
+                indicators["ohlc_4h"] = ohlc_raw
 
             contexts.append(
                 PairContext(
                     pair=pair,
                     timeframe=str(item.get("timeframe", timeframe)),
-                    last_price=last_price,
                     market_regime=regime,
-                    metadata=metadata,
+                    fear_greed=float(item.get("fgscore", 50)),
+                    indicators=indicators,
+                    context=metadata,
                 )
             )
 
