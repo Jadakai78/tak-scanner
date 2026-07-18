@@ -117,8 +117,15 @@ def _fmt_pushover(signal: Dict[str, Any], is_kill: bool = False) -> tuple[str, s
     grade  = "KILL" if is_kill else signal.get("grade", "?")
     action = signal.get("action_state", signal.get("intent", ""))
 
-    title = f"{'🔴 KILL' if is_kill else '🟢 JHL'} {grade}: {pair} {bias}"
-    body  = f"{engine} | Conv {conv} | {action}"
+    kill_type = signal.get("kill_type", "")
+    kill_label = {
+        "COUNCIL_KILL":    "🔴 COUNCIL KILL",
+        "APRIL_STANDDOWN": "🔴 APRIL STANDDOWN",
+        "CAUTION":         "🟡 CAUTION",
+    }.get(kill_type, "🔴 KILL" if is_kill else "🟢 JHL")
+    title = f"{kill_label} {grade}: {pair} {bias}"
+    kill_reason = signal.get("kill_reason", "")
+    body  = f"{engine} | Conv {conv} | {kill_reason or action}"
     return title, body
 
 
