@@ -7,23 +7,25 @@ from pathlib import Path
 logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(message)s")
 logger = logging.getLogger("scheduler")
 
-MODULE_DIR = Path(__file__).resolve().parent
-SCANNER        = MODULE_DIR / "tak_scanner_v3.py"
+MODULE_DIR     = Path(__file__).resolve().parent
+SCANNER        = MODULE_DIR / "tak_scanner_v4.py"   # v4 — was v3
 RTS_SNIPER     = MODULE_DIR / "rts_sniper.py"
-RTS_INTERVAL   = 10 * 60   # RTS sniper runs every 10 min
-RTS_TIMEOUT    = 300        # 5 min max per RTS cycle
-PYTHON = "python3"  # Windows: adjust if needed
-INTERVAL_SECONDS = 20 * 60  # 20 minutes
-ACTIVE_START_HOUR = 5   # 5 AM CDT
-ACTIVE_END_HOUR = 22    # 10 PM CDT
-TIMEOUT = 480           # 8 min max per scan (parallel fetches ~30-60s)
+RTS_INTERVAL   = 10 * 60
+RTS_TIMEOUT    = 300
+PYTHON         = "python3"
+INTERVAL_SECONDS = 20 * 60   # 20 minutes
+ACTIVE_START_HOUR = 5         # 5 AM CDT
+ACTIVE_END_HOUR   = 22        # 10 PM CDT
+TIMEOUT           = 600       # 10 min max per scan
 
-# Write directly to CF KV via REST API — bypasses WAF on the Worker URL
 CF_ACCOUNT_ID = "ea17be7c9b13c5f9c1fec378a44e9e39"
 CF_KV_NS_ID   = "e93558412bde4922828325e714bc44d8"
 CF_API_TOKEN  = "cfut_mlCYHlnsJWOJb4KUU22dSiaUVu8Qk0KhMMHopHeq2fb3cef8"
-CF_KV_URL     = f"https://api.cloudflare.com/client/v4/accounts/{CF_ACCOUNT_ID}/storage/kv/namespaces/{CF_KV_NS_ID}/values/signal_bus"
-SIGNAL_BUS    = MODULE_DIR / "signal_bus.json"
+CF_KV_URL     = (
+    f"https://api.cloudflare.com/client/v4/accounts/{CF_ACCOUNT_ID}"
+    f"/storage/kv/namespaces/{CF_KV_NS_ID}/values/signal_bus"
+)
+SIGNAL_BUS = MODULE_DIR / "signal_bus.json"
 
 
 def is_active_window():
@@ -38,7 +40,7 @@ def is_active_window():
 
 
 def push_to_cf():
-    """Write signal_bus.json directly to CF KV via REST API (bypasses Worker WAF)."""
+    """Write signal_bus.json directly to CF KV via REST API."""
     if not SIGNAL_BUS.exists():
         logger.warning("push_to_cf: signal_bus.json not found — skipping")
         return
@@ -54,8 +56,7 @@ def push_to_cf():
             },
         )
         with urllib.request.urlopen(req, timeout=15) as resp:
-            status = resp.status
-        logger.info("CF KV push OK — HTTP %s", status)
+            logger.info("CF KV push OK — HTTP %s", resp.status)
     except urllib.error.HTTPError as e:
         body = e.read().decode("utf-8", errors="ignore")[:200]
         logger.error("CF KV push HTTP error: %s %s — %s", e.code, e.reason, body)
@@ -74,14 +75,16 @@ def run_scan():
             cwd=str(MODULE_DIR),
             timeout=TIMEOUT,
             capture_output=True,
-            text=True
+            text=True,
         )
         if result.stdout:
             logger.info(result.stdout.strip())
         if result.stderr:
             logger.warning(result.stderr.strip()[:500])
+        # v4 scanner pushes to CF itself, but we also push here as backup
+        push_to_cf()
     except KeyboardInterrupt:
-        raise  # let the outer loop catch it cleanly
+        raise
     except subprocess.TimeoutExpired:
         logger.error("Scan timed out after %ds", TIMEOUT)
     except Exception as e:
@@ -89,9 +92,8 @@ def run_scan():
 
 
 def run_rts_sniper():
-    """Run RTS Sniper in a background thread — non-blocking."""
     if not RTS_SNIPER.exists():
-        logger.error("RTS Sniper not found: %s", RTS_SNIPER)
+        logger.warning("RTS Sniper not found — skipping")
         return
     try:
         logger.info("RTS Sniper cycle starting")
@@ -115,21 +117,16 @@ def run_rts_sniper():
 
 
 if __name__ == "__main__":
-    logger.info("JHL Scheduler starting. Interval: %d min. Window: %d-%d CDT",
-                INTERVAL_SECONDS // 60, ACTIVE_START_HOUR, ACTIVE_END_HOUR)
-    _rts_tick = 0   # counts 20-min intervals; sniper runs every 10 min
+    logger.info(
+        "JHL Scheduler starting. Scanner: %s | Interval: %d min | Window: %d-%d CDT",
+        SCANNER.name, INTERVAL_SECONDS // 60, ACTIVE_START_HOUR, ACTIVE_END_HOUR,
+    )
     while True:
         if is_active_window():
-            # Main scanner — every 20 min
             run_scan()
-            push_to_cf()
-            # RTS Sniper — parallel thread every 10 min
-            # (fires on every loop; 20-min scanner gives it overlap)
-            rts_thread = threading.Thread(
-                target=run_rts_sniper, daemon=True, name="rts-sniper"
-            )
+            rts_thread = threading.Thread(target=run_rts_sniper, daemon=True, name="rts-sniper")
             rts_thread.start()
-            logger.info("RTS Sniper thread launched (daemon)")
+            logger.info("RTS Sniper thread launched")
         else:
             logger.info("Outside active window — sleeping")
         time.sleep(INTERVAL_SECONDS)
