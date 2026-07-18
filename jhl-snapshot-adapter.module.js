@@ -4,8 +4,14 @@ export const CANONICAL_TOP_LEVEL_KEYS = [
 
 export function createCanonicalSnapshot(bus = {}, options = {}) {
   const nowIso = new Date().toISOString();
-  const lastScan = bus.last_scan || null;
-  const nextScan = bus.next_scan || null;
+  // Detect stale last_scan: if >2h old, fall back to rts_last_scan so display shows something current
+  const rawLastScan = bus.last_scan || null;
+  const rtsLastScan = bus.rts_last_scan || null;
+  const scanAge = rawLastScan ? (Date.now() - new Date(rawLastScan).getTime()) : Infinity;
+  const STALE_MS = 2 * 60 * 60 * 1000; // 2 hours
+  const isMainScannerStale = scanAge > STALE_MS;
+  const lastScan = rawLastScan || rtsLastScan || null;
+  const nextScan = bus.next_scan || bus.rts_next_scan || null;
   const pairUniverseCount = Number(bus?.pair_universe?.count || 0);
   const activePairs = Number(bus?.active_pairs || pairUniverseCount || 0);
   const deadPairs = Number(bus?.dead_pairs || 0);
@@ -25,6 +31,8 @@ export function createCanonicalSnapshot(bus = {}, options = {}) {
     session: {
       last_scan: lastScan,
       next_scan: nextScan,
+      rts_last_scan: rtsLastScan,
+      scanner_stale: isMainScannerStale,
       active_pairs: activePairs,
       dead_pairs: deadPairs,
       pair_universe_count: pairUniverseCount,
