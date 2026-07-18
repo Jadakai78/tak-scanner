@@ -82,6 +82,7 @@ def build_registry(fg_score: int):
         ("S6",      "s6_reversal",      "S6Reversal"),
         ("S7",      "s7_range_scalper", "S7RangeScalper"),
         ("S9",      "s9_capitulation",  "S9Capitulation"),
+        ("S10",     "s10_gimba_range",  "S10GimbaRange"),
         # RTS Council — retail trap hunters
         ("RTS_LIQ",    "rts_liq",    "RTSLiq"),
         ("RTS_BOS",    "rts_bos",    "RTSBos"),
