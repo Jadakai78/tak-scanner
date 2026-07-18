@@ -75,6 +75,91 @@ _monitor_thread = threading.Thread(target=_start_position_monitor, daemon=True, 
 _monitor_thread.start()
 
 # ── Signal aging daemon ───────────────────────────────────────────────────────
+# ── Signal aging — auto-expire stale PENDING signals ────────────────────────
+# Runs every 5 minutes. Removes PENDING signals whose conviction dropped
+# below 68 OR whose trap_risk crept to ≥0.65 since they were written.
+# CONFIRM signals are never touched here — position_monitor owns those.
+
+AGING_INTERVAL   = 300   # seconds between aging passes
+AGING_CONV_FLOOR = 68.0  # conviction floor for PENDING signals
+AGING_TRAP_GATE  = 0.65  # trap ceiling for PENDING signals
+AGING_MAX_AGE    = 600   # 10 min max lifetime for an unactioned PENDING signal
+
+def _signal_aging_loop():
+    """Background thread — prunes stale PENDING signals from the bus."""
+    import time as _time
+    logger.info("Signal aging loop started — interval=%ds", AGING_INTERVAL)
+    while True:
+        try:
+            _time.sleep(AGING_INTERVAL)
+            _run_signal_aging()
+        except Exception as exc:
+            logger.warning("Signal aging error: %s", exc)
+
+def _run_signal_aging():
+    """Single aging pass — remove PENDING signals that have gone stale."""
+    try:
+        bus = json.loads(SIGNAL_BUS.read_text())
+    except Exception:
+        return
+
+    now = datetime.now(timezone.utc)
+    signals_in  = bus.get("signals", [])
+    signals_out = []
+    removed = []
+
+    for sig in signals_in:
+        verdict = sig.get("december_verdict", "PENDING")
+
+        # Never touch CONFIRM or WAIT — position_monitor owns CONFIRM, human owns WAIT
+        if verdict in ("CONFIRM", "WAIT"):
+            signals_out.append(sig)
+            continue
+
+        # REJECT — already dead, keep for history but don't prune here
+        if verdict == "REJECT":
+            signals_out.append(sig)
+            continue
+
+        # PENDING — check conviction + trap + age
+        raw_conv  = float(sig.get("conviction", sig.get("final_conviction", 100)) or 100)
+        conv      = raw_conv * 100 if raw_conv <= 1.0 else raw_conv
+        trap_risk = float(sig.get("trap_risk", sig.get("trap_score", 0)) or 0)
+
+        # Age check
+        fired_at_str = sig.get("fired_at", "")
+        age_seconds  = 9999
+        if fired_at_str:
+            try:
+                fired_at = datetime.fromisoformat(fired_at_str.replace("Z", "+00:00"))
+                age_seconds = (now - fired_at).total_seconds()
+            except Exception:
+                pass
+
+        reasons = []
+        if conv < AGING_CONV_FLOOR:
+            reasons.append(f"conviction {conv:.1f}<{AGING_CONV_FLOOR}")
+        if trap_risk >= AGING_TRAP_GATE:
+            reasons.append(f"trap {trap_risk:.2f}≥{AGING_TRAP_GATE}")
+        if age_seconds > AGING_MAX_AGE:
+            reasons.append(f"age {int(age_seconds)}s>{AGING_MAX_AGE}s")
+
+        if reasons:
+            pair = sig.get("pair","?")
+            logger.info("SIGNAL AGED OUT %s — %s", pair, " | ".join(reasons))
+            removed.append(pair)
+            sig["december_verdict"] = "EXPIRED"
+            sig["expired_at"]       = now.isoformat()
+            sig["expiry_reason"]    = " | ".join(reasons)
+            signals_out.append(sig)
+        else:
+            signals_out.append(sig)
+
+    if removed:
+        bus["signals"] = signals_out
+        SIGNAL_BUS.write_bytes(json.dumps(bus, ensure_ascii=False, indent=2).encode())
+        logger.info("Aging pass complete — expired %d signal(s): %s", len(removed), removed)
+
 _aging_thread = threading.Thread(target=_signal_aging_loop, daemon=True, name="signal-aging")
 _aging_thread.start()
 
