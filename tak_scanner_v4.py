@@ -116,29 +116,36 @@ def build_bus_payload(result, fg, regime, pair_rows, scan_started, scan_complete
     def flatten(published_list):
         out = []
         for ps in published_list:
-            p = ps.payload if hasattr(ps, "payload") else {}
-            identity = p.get("identity", {})
-            summary  = p.get("summary", {})
-            evidence = p.get("evidence", {})
-            score    = float(summary.get("score", 0))
+            score = float(getattr(ps, "score", 0))
+            exe   = getattr(ps, "execution", None)
+            entry = getattr(exe, "entry_idea", None) if exe else None
+            sl    = getattr(exe, "stop_idea",  None) if exe else None
+            tp    = getattr(exe, "target_idea", None) if exe else None
+            rr    = getattr(exe, "rr_estimate", None) if exe else None
+            intent_raw = getattr(exe, "execution_intent", None) if exe else None
             out.append({
-                "pair":       identity.get("pair", ""),
-                "bias":       identity.get("side", "LONG"),
-                "engine":     identity.get("setup_type", ""),
+                "pair":       getattr(ps, "pair",       ""),
+                "bias":       getattr(ps, "side",       "LONG"),
+                "engine":     getattr(ps, "specialist", ""),
+                "setup_type": getattr(ps, "setup_type", ""),
                 "grade":      _score_to_grade(score),
                 "conviction": round(score / 100.0, 3),
-                "entry":      evidence.get("entry_idea", 0),
-                "sl":         evidence.get("stop_idea", 0),
-                "tp":         evidence.get("target_idea", 0),
-                "rr":         evidence.get("rr", 0),
+                "score":      round(score, 2),
+                "entry":      entry,
+                "sl":         sl,
+                "tp":         tp,
+                "rr":         rr,
                 "regime":     regime,
-                "intent":     "EXECUTE" if summary.get("execution_ready") else "WATCH",
+                "intent":     intent_raw or ("EXECUTE" if getattr(ps, "execution_ready", False) else "WATCH"),
                 "prop":       True,
-                "mtf_verdict": p.get("context", {}).get("mtf_verdict", "unknown"),
+                "thesis":     getattr(ps, "thesis", ""),
+                "route":      getattr(ps, "route", ""),
             })
         return out
 
-    all_signals = flatten(result.live_signals) + flatten(result.caution_signals)
+    live_sigs    = flatten(result.live_signals)
+    caution_sigs = flatten(result.caution_signals)
+    all_signals  = live_sigs + caution_sigs
     killed = [
         {"pair": getattr(ps, "pair", ""), "reason": "killed"}
         for ps in result.killed_signals
@@ -146,22 +153,24 @@ def build_bus_payload(result, fg, regime, pair_rows, scan_started, scan_complete
     prop_pairs = [r.get("pair", "") for r in pair_rows if r.get("is_prop")]
 
     return {
-        "last_scan":        scan_completed,
-        "next_scan":        None,
-        "f_g":              fg,
-        "active_pairs":     len(pair_rows),
-        "dead_pairs":       0,
-        "pair_universe":    {"count": len(pair_rows), "prop_count": len(prop_pairs)},
-        "signals":          all_signals,
-        "killed_signals":   killed,
-        "regime_map":       {r.get("pair", ""): regime for r in pair_rows},
-        "sprint_mode":      False,
-        "worker_push_ok":   push_ok,
-        "bus_write_ok":     True,
-        "environment":      "railway",
-        "generated_at":     scan_completed,
+        "last_scan":      scan_completed,
+        "next_scan":      None,
+        "f_g":            fg,
+        "active_pairs":   len(pair_rows),
+        "dead_pairs":     0,
+        "pair_universe":  {"count": len(pair_rows), "prop_count": len(prop_pairs)},
+        "signals":        all_signals,
+        "killed_signals": killed,
+        "regime_map":     {r.get("pair", ""): regime for r in pair_rows},
+        "sprint_mode":    False,
+        "worker_push_ok": push_ok,
+        "bus_write_ok":   True,
+        "environment":    "railway",
+        "generated_at":   scan_completed,
         "session_stats": {
             "signals_fired": len(all_signals),
+            "live":          len(live_sigs),
+            "caution":       len(caution_sigs),
             "killed":        len(killed),
             "s_grade":       sum(1 for s in all_signals if s.get("grade") == "S"),
             "a_grade":       sum(1 for s in all_signals if s.get("grade") == "A"),
@@ -188,14 +197,32 @@ def run():
         return
     logger.info("Active pairs: %d", len(pair_rows))
 
-    # 3. Add fgscore to each row so intake/adapter can use it
+    # 3. Add fgscore + df to each row so intake/adapter + regime classifier can use them
+    import pandas as pd
+    _OHLC_COLS = ["time","open","high","low","close","vwap","volume","count"]
     for row in pair_rows:
         row.setdefault("fgscore", fg_score)
         row.setdefault("market_regime", "unknown")
+        # Build df from ohlc_4h so RegimeClassifier can run
+        ohlc_raw = row.get("ohlc_4h") or []
+        if ohlc_raw and "df" not in row:
+            try:
+                df = pd.DataFrame(ohlc_raw, columns=_OHLC_COLS[:len(ohlc_raw[0])])
+                for col in ["open","high","low","close","volume"]:
+                    if col in df.columns:
+                        df[col] = pd.to_numeric(df[col], errors="coerce")
+                row["df"] = df
+            except Exception:
+                pass
 
     # 4. Build PairContext objects via ScannerPairIntake
     from scannerpair_intake import ScannerPairIntake
-    intake = ScannerPairIntake()
+    try:
+        from regime_classifier import RegimeClassifier
+        _regime_clf = RegimeClassifier()
+    except Exception:
+        _regime_clf = None
+    intake = ScannerPairIntake(regime_classifier=_regime_clf)
     contexts = intake.build_contexts(pair_rows, timeframe="4h")
     if not contexts:
         logger.error("PairIntake produced 0 contexts — aborting")
