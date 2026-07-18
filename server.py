@@ -62,6 +62,18 @@ def _start_kraken_bot():
 _kraken_thread = threading.Thread(target=_start_kraken_bot, daemon=True, name="kraken-bot")
 _kraken_thread.start()
 
+# ── Position monitor — council eyes on live trades ───────────────────────────
+def _start_position_monitor():
+    try:
+        from position_monitor import run_monitor  # type: ignore
+        run_monitor()
+    except Exception as exc:
+        import logging as _log
+        _log.getLogger("server").error("Position monitor failed to start: %s", exc)
+
+_monitor_thread = threading.Thread(target=_start_position_monitor, daemon=True, name="position-monitor")
+_monitor_thread.start()
+
 BASE = Path(__file__).resolve().parent
 SIGNAL_BUS = BASE / "signal_bus.json"
 CF_WORKER_URL = "https://jhl-signal-bus.blazing0478.workers.dev"
