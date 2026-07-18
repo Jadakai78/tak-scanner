@@ -156,7 +156,92 @@ def build_bus_payload(result, fg, regime, pair_rows, scan_started, scan_complete
 
     live_sigs    = flatten(result.live_signals)
     caution_sigs = flatten(result.caution_signals)
-    all_signals  = live_sigs + caution_sigs
+    # ── Promote qualifying RTS signals into all_signals ─────────────────────
+    # RTS engines hunt retail liquidation — they ARE primary signals, not just
+    # field intelligence. Promote ATTACK-intent RTS signals with conviction ≥75
+    # that survived the trap detector into the live feed with proper levels.
+    rts_promoted: list = []
+    survivor_pairs = {s.get("pair","") for s in survivors} if "survivors" in dir() else set()
+
+    for pair_key, rts_list in rts_map.items():
+        for rts in rts_list:
+            intent     = str(rts.get("intent","")).upper()
+            conviction = float(rts.get("conviction", rts.get("final_conviction", 0)) or 0)
+            # Normalize 0-1 scale to 0-100
+            if conviction <= 1.0:
+                conviction *= 100
+            bias = str(rts.get("bias","")).upper() or "LONG"
+            engine = str(rts.get("engine","RTS"))
+
+            # Only promote ATTACK signals with ≥75 conviction
+            if intent not in {"ATTACK","ATTACKBREAK","ATTACK_TRAP"} or conviction < 75:
+                continue
+
+            # Build entry/stop/target from available levels
+            entry  = float(rts.get("entry_idea", rts.get("entry", 0)) or 0)
+            sl     = float(rts.get("stop_idea",  rts.get("sl", rts.get("kill_level", 0))) or 0)
+            tp     = float(rts.get("target_idea", rts.get("tp", 0)) or 0)
+            atr_v  = float(rts.get("atr", 0) or 0)
+
+            # Use current bar as entry if not set
+            bar = bar_map.get(pair_key, {})
+            if entry == 0:
+                entry = float(bar.get("close", 0))
+
+            # Build sl from bos_level / zone / kill_level if not set
+            if sl == 0:
+                for field in ("bos_level","zone_low","zone_high","liq_level","flip_level"):
+                    v = float(rts.get(field, 0) or 0)
+                    if v > 0:
+                        sl = v * (0.999 if bias=="LONG" else 1.001)
+                        break
+                if sl == 0 and atr_v > 0:
+                    sl = entry - 1.5*atr_v if bias=="LONG" else entry + 1.5*atr_v
+
+            # Build tp — 2.5R minimum, or use existing
+            if tp == 0 and sl > 0 and entry > 0:
+                risk = abs(entry - sl)
+                tp = entry + 2.5*risk if bias=="LONG" else entry - 2.5*risk
+
+            if entry == 0 or sl == 0 or tp == 0:
+                continue
+
+            risk = abs(entry - sl)
+            rr   = round(abs(tp - entry) / risk, 2) if risk > 0 else 0
+
+            promoted_sig = {
+                "pair":            pair_key,
+                "bias":            bias,
+                "engine":          engine,
+                "grade":           "S" if conviction >= 88 else "A",
+                "conviction":      round(conviction, 1),
+                "entry":           round(entry, 6),
+                "sl":              round(sl, 6),
+                "tp":              round(tp, 6),
+                "rr":              rr,
+                "intent":          intent,
+                "action_state":    "CLICK",
+                "action_reason":   f"RTS {engine} {intent} — conviction {conviction:.1f}",
+                "regime":          rts.get("regime","HUNT"),
+                "prop":            rts.get("prop", False),
+                "mtf_verdict":     rts.get("mtf_verdict",""),
+                "trap_risk":       float(rts.get("trap_score", 0) or 0),
+                "remi_status":     rts.get("remi_status","CLEAN"),
+                "remi_caution":    rts.get("remi_caution", False),
+                "december_verdict": "PENDING",
+                "fired_at":        utc_now(),
+                "rts_source":      True,   # flag so feed can style differently
+            }
+            rts_promoted.append(promoted_sig)
+            logger.info(
+                "RTS PROMOTED %s %s engine=%s conv=%.1f rr=%.2f",
+                pair_key, bias, engine, conviction, rr
+            )
+
+    if rts_promoted:
+        logger.info("RTS promoted %d signal(s) into live feed", len(rts_promoted))
+
+    all_signals  = live_sigs + caution_sigs + rts_promoted
     killed = [
         {"pair": getattr(ps, "pair", ""), "reason": "killed"}
         for ps in result.killed_signals
