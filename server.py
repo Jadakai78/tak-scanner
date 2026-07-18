@@ -285,7 +285,7 @@ def _push_verdict_to_kv(bus: dict):
         req = urllib.request.Request(
             f"{CF_WORKER_URL}/update",
             data=payload,
-            headers={"Content-Type": "application/json", "X-JHL-Secret": "jhl2025"},
+            headers={"Content-Type": "application/json", "X-JHL-Secret": "jhl2026dragon"},
             method="POST",
         )
         with urllib.request.urlopen(req, timeout=8) as resp:
