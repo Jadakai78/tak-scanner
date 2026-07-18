@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from scannermodels import CandidateSignal, CouncilResult
+from scannermodels import CandidateSignal, CouncilDecision
 
 
 class ScannerCouncil:
@@ -12,12 +12,12 @@ class ScannerCouncil:
         self.live_threshold = live_threshold
         self.caution_threshold = caution_threshold
 
-    def adjudicate(self, candidate: CandidateSignal) -> CouncilResult:
+    def adjudicate(self, candidate: CandidateSignal) -> CouncilDecision:
         veto_reasons = []
 
         if candidate.review is None:
             veto_reasons.append("missing_remi_review")
-            return CouncilResult(
+            return CouncilDecision(
                 decision="kill",
                 battlefield_ok=False,
                 veto_reasons=veto_reasons,
@@ -29,7 +29,7 @@ class ScannerCouncil:
 
         if candidate.review.decision == "reject":
             veto_reasons.append("remi_rejected")
-            return CouncilResult(
+            return CouncilDecision(
                 decision="kill",
                 battlefield_ok=False,
                 veto_reasons=veto_reasons,
@@ -47,7 +47,7 @@ class ScannerCouncil:
         battlefield_ok = len(veto_reasons) == 0
 
         if not battlefield_ok:
-            return CouncilResult(
+            return CouncilDecision(
                 decision="kill",
                 battlefield_ok=False,
                 veto_reasons=veto_reasons,
@@ -56,7 +56,7 @@ class ScannerCouncil:
             )
 
         if reviewed_score >= self.live_threshold and candidate.review.decision == "approve":
-            return CouncilResult(
+            return CouncilDecision(
                 decision="live",
                 battlefield_ok=True,
                 veto_reasons=[],
@@ -65,7 +65,7 @@ class ScannerCouncil:
             )
 
         if reviewed_score >= self.caution_threshold:
-            return CouncilResult(
+            return CouncilDecision(
                 decision="caution",
                 battlefield_ok=True,
                 veto_reasons=[],
@@ -73,7 +73,7 @@ class ScannerCouncil:
                 execution_ready=False,
             )
 
-        return CouncilResult(
+        return CouncilDecision(
             decision="kill",
             battlefield_ok=False,
             veto_reasons=["score_below_caution_band"],
