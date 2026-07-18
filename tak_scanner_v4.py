@@ -175,10 +175,29 @@ def build_bus_payload(result, fg, regime, pair_rows, scan_started, scan_complete
         "killed_signals": killed,
         "regime_map":     {r.get("pair", ""): regime for r in pair_rows},
         "sprint_mode":    False,
+        "session": {
+            "active_pairs":        len(pair_rows),
+            "pair_universe_count": len(pair_rows),
+            "dead_pairs":          0,
+            "sprint_mode":         False,
+            "last_scan":           scan_completed,
+            "next_scan":           None,
+        },
         "worker_push_ok": push_ok,
         "bus_write_ok":   True,
         "environment":    "railway",
         "generated_at":   scan_completed,
+        "health": {
+            "bus_write_ok":      True,
+            "worker_push_ok":    push_ok,
+            "bus_health_pct":    100 if push_ok else 50,
+            "scan_duration_sec": (
+                (lambda a, b: (b - a).total_seconds()
+                 if hasattr(a, "total_seconds") or hasattr(b, "total_seconds")
+                 else 0)(scan_started, scan_completed)
+                if scan_started and scan_completed else 0
+            ),
+        },
         "session_stats": {
             "signals_fired": len(all_signals),
             "live":          len(live_sigs),
