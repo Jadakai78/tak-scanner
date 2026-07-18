@@ -110,7 +110,11 @@ function emptyCard(text){
 }
 
 function renderKpis(snapshot){
-  const kpis=[["Last Scan",safeText(snapshot.session?.last_scan)],["Next Scan",safeText(snapshot.session?.next_scan)],["Active Pairs",safeText(snapshot.session?.active_pairs)],["Signals",safeArr(snapshot.signals).length],["Killed",safeArr(snapshot.alerts).length],["Scan Duration",`${fmtNum(snapshot.health?.scan_duration_sec,2)}s`]];
+  const stale = snapshot.session?.scanner_stale;
+  const lastScanDisplay = stale
+    ? `⚠ STALE — RTS ${(snapshot.session?.rts_last_scan||'').slice(11,19)||'—'} UTC`
+    : (snapshot.session?.last_scan||'—').slice(11,19)+' UTC';
+  const kpis=[["Last Scan",lastScanDisplay],["Next Scan",(snapshot.session?.next_scan||'—').slice(11,19)||'—'],["Active Pairs",safeText(snapshot.session?.active_pairs)],["Signals",safeArr(snapshot.signals).length],["Killed",safeArr(snapshot.alerts).length],["Scan Duration",`${fmtNum(snapshot.health?.scan_duration_sec,2)}s`]];
   document.getElementById('kpis').innerHTML=kpis.map(([label,value])=>`<div class="card kpi"><div class="label">${label}</div><div class="value">${value}</div><div class="sub">canonical field</div></div>`).join('');
   document.getElementById('fgScore').textContent=safeText(snapshot.health?.fear_greed?.score);
   document.getElementById('fgLabel').textContent=safeText(snapshot.health?.fear_greed?.label);
