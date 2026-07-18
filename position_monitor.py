@@ -148,7 +148,7 @@ def _check_position(position: Dict[str, Any], current_price: float,
         action     = str(rts.get("action_state", "")).upper()
 
         # Hard trap
-        if trap_score >= 0.75 and intent in {"TRAP", "ATTACKTRAP", "FAKEOUT"}:
+        if trap_score >= 0.75 and intent in {"TRAP", "ATTACKTRAP", "FAKEOUT", "ATTACK_TRAP"}:
             return "KILL", (
                 f"TRAP DETECTED — RTS {rts.get('engine','?')} trap_score={trap_score:.2f} "
                 f"intent={intent}"
@@ -159,6 +159,45 @@ def _check_position(position: Dict[str, Any], current_price: float,
                 f"RTS {rts.get('engine','?')} action={action} trap={trap_score:.2f} — "
                 f"watching {pair}"
             )
+
+    # ── 4. Conviction decay — live position conviction dropped below floor ─
+    # Re-read the current bus to get the freshest conviction for this pair.
+    # If the scanner rescored the pair and conviction fell below 70,
+    # or trap crept to ≥0.65, cut immediately.
+    CONVICTION_FLOOR = 70.0
+    TRAP_CAUTION_GATE = 0.65
+    TRAP_KILL_GATE    = 0.75
+
+    try:
+        import json, pathlib
+        bus_path = pathlib.Path(__file__).resolve().parent / "signal_bus.json"
+        if bus_path.exists():
+            bus_data = json.loads(bus_path.read_text())
+            for sig in bus_data.get("signals", []):
+                if sig.get("pair") != pair:
+                    continue
+                # Normalize conviction to 0-100
+                raw_conv = _safe(sig.get("conviction", sig.get("final_conviction", 100)))
+                conv = raw_conv * 100 if raw_conv <= 1.0 else raw_conv
+                sig_trap = _safe(sig.get("trap_risk", sig.get("trap_score", 0)))
+
+                if sig_trap >= TRAP_KILL_GATE:
+                    return "KILL", (
+                        f"CONVICTION KILL — trap_score {sig_trap:.2f} ≥ {TRAP_KILL_GATE} "
+                        f"on LIVE {pair} position"
+                    )
+                if conv < CONVICTION_FLOOR:
+                    return "KILL", (
+                        f"CONVICTION DECAY — conv {conv:.1f} fell below floor {CONVICTION_FLOOR} "
+                        f"on LIVE {pair} position"
+                    )
+                if sig_trap >= TRAP_CAUTION_GATE:
+                    return "CAUTION", (
+                        f"TRAP CREEP — trap_score {sig_trap:.2f} ≥ {TRAP_CAUTION_GATE} "
+                        f"on {pair} — watching"
+                    )
+    except Exception as _conv_err:
+        logger.debug("Conviction decay check failed %s: %s", pair, _conv_err)
 
     return "CLEAR", ""
 
