@@ -188,21 +188,59 @@ function render(snapshot){
 
 
 function renderCouncil(snapshot){
-  const council = snapshot.council || {};
-  const april   = snapshot.april_view || {};
-  const remi    = snapshot.remi_summary || {};
-  const ts      = council.timestamp || snapshot.session?.last_scan || '—';
-  document.getElementById('councilTimestamp').textContent = ts.slice(11,19)||ts;
-  document.getElementById('councilState').textContent = april.state || council.state || '—';
-  // April
-  document.getElementById('aprilMsg').textContent   = april.message || april.state || 'No broadcast';
-  document.getElementById('aprilState').textContent  = april.context || '';
-  // Remi
-  document.getElementById('remiMsg').textContent    = remi.verdict || remi.message || 'No gate signal';
-  document.getElementById('remiState').textContent   = remi.reason  || '';
+  // April lives in audit.april_view (trap_detector.april_system_view output)
+  const audit  = snapshot.audit || {};
+  const april  = audit.april_view || snapshot.april_view || {};
+  // Remi — aggregate from signals: count CLEAN vs CAUTION
+  const sigs   = safeArr(snapshot.signals);
+  const cautions = sigs.filter(s => s.remi_caution || s.remi_status === 'CAUTION').length;
+  const cleans   = sigs.filter(s => !s.remi_caution && s.remi_status === 'CLEAN').length;
+  // Council consensus — derive from April mode + Remi gate
+  const mode   = april.council_mode || '';
+  const ts     = april.ts || snapshot.last_scan || snapshot.generated_at || '—';
+
+  // Timestamp
+  const tsDisp = typeof ts === 'string' ? (ts.slice(11,19)||ts) : '—';
+  document.getElementById('councilTimestamp').textContent = tsDisp;
+
+  // State badge — April mode drives it
+  const modeColors = {STAND_DOWN:'#ef4444', TIME_TO_HUNT:'#f5c518', NORMAL:'#22c55e'};
+  const badge = document.getElementById('councilState');
+  badge.textContent = mode || 'PENDING';
+  badge.style.color = modeColors[mode] || 'var(--muted)';
+
+  // April panel
+  const aprilMsgs = {
+    STAND_DOWN:    'STAND DOWN — trap activity too high this cycle.',
+    TIME_TO_HUNT:  'TIME TO HUNT — clean flips available after trap kills.',
+    NORMAL:        'NORMAL — market clear, execute on conviction.',
+    '':            'No broadcast'
+  };
+  document.getElementById('aprilMsg').textContent  = aprilMsgs[mode] || mode;
+  const killedPairs = safeArr(april.killed_pairs).join(', ') || 'none';
+  const flipPairs   = safeArr(april.flip_pairs).join(', ') || 'none';
+  document.getElementById('aprilState').textContent = `killed: ${killedPairs} | flips: ${flipPairs}`;
+
+  // Remi panel
+  document.getElementById('remiMsg').textContent   = sigs.length
+    ? `${cleans} CLEAN · ${cautions} CAUTION this cycle`
+    : 'No gate signal';
+  document.getElementById('remiState').textContent  = cautions > 0
+    ? `${cautions} signal(s) need C1 confirm before entry`
+    : 'All signals clear';
+
   // Council consensus
-  document.getElementById('councilMsg').textContent  = council.consensus || council.message || 'Awaiting council vote';
-  document.getElementById('councilSubstate').textContent = council.action_state || '';
+  const consensusMsgs = {
+    STAND_DOWN:   'No entries. Trap activity exceeds threshold.',
+    TIME_TO_HUNT: 'Selective entries on clean flips only.',
+    NORMAL:       'Full execution mode. Execute on Sammy + A conviction.',
+    '':           'Awaiting council vote'
+  };
+  document.getElementById('councilMsg').textContent = consensusMsgs[mode] || 'Awaiting council vote';
+  const caution_count = april.caution_count || 0;
+  document.getElementById('councilSubstate').textContent = mode
+    ? `caution_count=${caution_count} | trap_kills=${safeArr(april.killed_pairs).length}`
+    : '';
 }
 
 function wireTabs(){const tabs=document.querySelectorAll('.tab');const panels=document.querySelectorAll('.tab-panel');tabs.forEach(tab=>tab.addEventListener('click',()=>{tabs.forEach(t=>t.classList.remove('active'));panels.forEach(p=>p.classList.add('hidden'));tab.classList.add('active');document.getElementById(tab.dataset.tab).classList.remove('hidden')}))}
