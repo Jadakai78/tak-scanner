@@ -25,10 +25,10 @@ logging.basicConfig(
 )
 logger = logging.getLogger("strategies.s7")
 
-FLAT_SLOPE_MAX = 0.05      # EMA50 slope < 0.05% over 10 candles
+FLAT_SLOPE_MAX = 0.08      # EMA50 slope < 0.08% (was 0.05 — too strict for choppy markets)
 BOUNDARY_TOLERANCE = 0.01  # within 1% of the range edge
-RSI_LOW = 40
-RSI_HIGH = 60
+RSI_LOW = 35              # loosened from 40 — extremes at range boundary are valid
+RSI_HIGH = 65             # loosened from 60
 
 
 class S7RangeScalper:
