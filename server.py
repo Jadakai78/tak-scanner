@@ -2,11 +2,28 @@
 from flask import Flask, jsonify, send_file, redirect
 from flask_cors import CORS
 import json
+import threading
+import importlib
+import sys
 from pathlib import Path
 from datetime import datetime, timezone
 
 app = Flask(__name__)
 CORS(app)
+
+# ── Launch scheduler as a background daemon thread ──────────────────────────
+# This is what makes the scanner run entirely on Railway with no local machine
+# involvement. gunicorn starts server.py, server.py starts the scan loop.
+def _start_scheduler():
+    try:
+        import scheduler as sched
+        sched.run()   # blocking loop — runs in daemon thread
+    except Exception as exc:
+        import logging
+        logging.getLogger("server").error("Scheduler failed to start: %s", exc)
+
+_sched_thread = threading.Thread(target=_start_scheduler, daemon=True, name="scheduler")
+_sched_thread.start()
 
 BASE = Path(__file__).resolve().parent
 SIGNAL_BUS = BASE / "signal_bus.json"
