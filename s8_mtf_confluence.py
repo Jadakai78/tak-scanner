@@ -49,12 +49,6 @@ class S8MTFConfluence:
         fetch_ohlc: Optional[Callable[[str, int], Optional[pd.DataFrame]]] = None,
         ai_supertrend: Optional[Any] = None,
     ) -> None:
-        """Initialize the overlay.
-
-        Args:
-            fetch_ohlc: OHLC fetcher; defaults to ``PairUniverse().fetch_ohlc``.
-            ai_supertrend: Optional AISupertrend; lazily created if omitted.
-        """
         if fetch_ohlc is None:
             sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
             from pair_universe import PairUniverse  # type: ignore
@@ -70,7 +64,6 @@ class S8MTFConfluence:
             self._ast = AISupertrend()
         return self._ast
 
-    # ------------------------------------------------------------------
     def _tf_score(
         self, pair: str, bias: str, df: Optional[pd.DataFrame]
     ) -> float:
@@ -78,14 +71,6 @@ class S8MTFConfluence:
 
         Components (equal thirds): EMA alignment, AI-ST direction match, key
         level proximity.
-
-        Args:
-            pair: Pair symbol (for ST history keying).
-            bias: 'LONG' or 'SHORT'.
-            df: OHLC for the timeframe, or ``None`` (returns neutral 0.5).
-
-        Returns:
-            Weighted-average sub-score in [0, 1].
         """
         if df is None or len(df) < 60:
             return 0.5  # neutral when data is unavailable
@@ -93,7 +78,7 @@ class S8MTFConfluence:
         close = df["close"]
         last = float(close.iloc[-1])
 
-        # EMA alignment.
+        # EMA alignment
         e20 = float(ema(close, 20).iloc[-1])
         e50 = float(ema(close, 50).iloc[-1])
         e200 = float(ema(close, 200).iloc[-1]) if len(df) >= 200 else e50
@@ -102,7 +87,7 @@ class S8MTFConfluence:
         else:
             ema_score = 1.0 if e20 < e50 < e200 else (0.5 if e20 < e50 else 0.0)
 
-        # AI-ST direction match.
+        # AI-ST direction match
         try:
             st = self._ai_st().compute(f"{pair}_mtf", df, update=True)
             st_match = 1.0 if (
@@ -113,7 +98,7 @@ class S8MTFConfluence:
             logger.debug("S8 %s ST failed: %s", pair, exc)
             st_match = 0.5
 
-        # Key level proximity (trade toward the nearer opposing level).
+        # Key level proximity
         level_score = self._level_score(df, last, bias)
 
         return (ema_score + st_match + level_score) / 3.0
@@ -134,17 +119,13 @@ class S8MTFConfluence:
             return 0.5
         return 0.0
 
-        if rawbias not in ("LONG", "SHORT"):
-            return 0.0
-
-        pair_key = item.getpairkey() if callable(item.getpairkey) else item.getpairkey
-
-        mtf = self.s8.score_mtf(
-            pair=pair,
-            bias=rawbias,
-            ohlc_4h=df,
-            pair_key=pair_key,
-        )
+    def score_mtf(
+        self,
+        pair: str,
+        bias: str,
+        ohlc_4h: Optional[pd.DataFrame],
+        pair_key: Optional[str] = None,
+    ) -> Dict[str, Any]:
         """Score multi-timeframe confluence for a proposed signal.
 
         Args:
@@ -159,9 +140,10 @@ class S8MTFConfluence:
         """
         bias = bias.upper()
         key = pair_key or f"{pair}USD"
+
         try:
             daily = self.fetch_ohlc(key, 1440)
-        except Exception as exc:  # noqa: BLE001 - never let a fetch crash scoring
+        except Exception as exc:  # noqa: BLE001
             logger.warning("S8 daily fetch failed for %s: %s", pair, exc)
             daily = None
         try:
@@ -179,6 +161,7 @@ class S8MTFConfluence:
             + h4_score * TF_WEIGHTS["h4"]
             + h1_score * TF_WEIGHTS["h1"]
         )
+
         if mtf_score >= FULL_THRESHOLD:
             verdict = "FULL"
         elif mtf_score >= PARTIAL_THRESHOLD:
@@ -186,8 +169,10 @@ class S8MTFConfluence:
         else:
             verdict = "CONFLICT"
 
-        logger.info("S8 %s %s -> %s (%.2f) [D=%.2f 4H=%.2f 1H=%.2f]",
-                    pair, bias, verdict, mtf_score, daily_score, h4_score, h1_score)
+        logger.info(
+            "S8 %s %s -> %s (%.2f) [D=%.2f 4H=%.2f 1H=%.2f]",
+            pair, bias, verdict, mtf_score, daily_score, h4_score, h1_score,
+        )
         return {
             "mtf_verdict": verdict,
             "mtf_score": round(mtf_score, 4),
@@ -204,12 +189,17 @@ if __name__ == "__main__":
     logger.info("=== S8MTFConfluence demo ===")
     pu = PairUniverse()
     s8 = S8MTFConfluence(fetch_ohlc=pu.fetch_ohlc)
-    for sym, key, bias in [("BTC", "XXBTZUSD", "LONG"),
-                           ("SOL", "SOLUSD", "SHORT"),
-                           ("XRP", "XRPUSD", "LONG")]:
+    for sym, key, bias in [
+        ("BTC", "XXBTZUSD", "LONG"),
+        ("SOL", "SOLUSD", "SHORT"),
+        ("XRP", "XRPUSD", "LONG"),
+    ]:
         df = pu.fetch_ohlc(key, interval=240)
         if df is None:
-            print(f"{sym}: fetch failed"); continue
+            print(f"{sym}: fetch failed")
+            continue
         res = s8.score_mtf(sym, bias, df, pair_key=key)
-        print(f"{sym} {bias}: {res['mtf_verdict']} score={res['mtf_score']} "
-              f"(D={res['daily_score']} 4H={res['h4_score']} 1H={res['h1_score']})")
+        print(
+            f"{sym} {bias}: {res['mtf_verdict']} score={res['mtf_score']} "
+            f"(D={res['daily_score']} 4H={res['h4_score']} 1H={res['h1_score']})"
+        )
