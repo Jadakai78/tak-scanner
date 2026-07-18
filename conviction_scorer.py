@@ -1,24 +1,20 @@
-"""conviction_scorer.py — Unified 0-1 conviction scorer + S8 MTF multiplier.
+"""conviction_scorer.py — JHL V2 Unified Conviction Scorer.
 
-AI Component 2 of JHL Trading Architecture v2. Every strategy engine emits a raw
-signal; this module grades it S/A/B/C/F on a single 0.0-1.0 scale so the whole
-system speaks one language.
+8-factor weighted score in three buckets (core / defensive / offensive).
+Conviction score 0-100 IS the grade — no separate letter grade system.
+Feed threshold labels (S/A) are filter names only, not signal labels.
 
-Scoring is a weighted sum of seven criteria (R:R, structure quality, AI
-SuperTrend alignment, volume, regime fit, RSI quality, F&G alignment). The S8
-Multi-Timeframe verdict then multiplies the base score. A hard 2R gate rejects
-anything below R:R 2.0 before scoring.
-
-Per-engine weights are loaded from ``models/scorer_weights_{engine}.json`` when
-present and nudged by a small gradient step each time a trade outcome is logged.
+Bonus system: offensive + defensive premium stacking, capped at 3.0×.
+Canonical signal output: score_8, action_state, action_reason per contract v1.
 """
 
 from __future__ import annotations
 
 import json
 import logging
+import math
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 logging.basicConfig(
     level=logging.INFO,
@@ -26,585 +22,561 @@ logging.basicConfig(
 )
 logger = logging.getLogger("conviction_scorer")
 
-MODULE_DIR = Path(__file__).resolve().parent
-MODELS_DIR = MODULE_DIR / "models"
+MODULE_DIR  = Path(__file__).resolve().parent
+MODELS_DIR  = MODULE_DIR / "models"
 
-# Default criterion weights (per S1 engine baseline). Must sum to ~1.0.
-BASE_WEIGHTS: Dict[str, float] = {
-    "rr_ratio": 0.25,
-    "structure_quality": 0.20,
-    "ai_st_alignment": 0.15,
-    "volume_ratio": 0.10,
-    "regime_fit": 0.15,
-    "rsi_quality": 0.10,
-    "fg_alignment": 0.05,
+# ── Hard gates ────────────────────────────────────────────────────────────────
+MIN_RR        = 2.0
+SCORE_CAP     = 99.0   # raw 0-100 scale
+MAX_BONUS_MULT = 3.0   # bonuses stack up to 3×
+
+# ── Feed threshold names (filter only — NOT stamped on signals) ───────────────
+FEED_S_THRESHOLD = 88
+FEED_A_THRESHOLD = 75
+
+# ── MTF multipliers ───────────────────────────────────────────────────────────
+MTF_MULTIPLIERS = {"FULL": 1.20, "PARTIAL": 1.00, "CONFLICT": 0.88}
+
+# ── Three-bucket base weights (must sum to 1.0) ───────────────────────────────
+# Core structure — 40%
+CORE_WEIGHTS: Dict[str, float] = {
+    "structure_break":  0.12,
+    "htf_bias":         0.10,
+    "momentum_align":   0.08,
+    "ob_proximity":     0.10,
+}
+# Defensive — 30%  (trap_risk is a PENALTY, so its contribution is subtracted)
+DEF_WEIGHTS: Dict[str, float] = {
+    "liq_sweep_quality":  0.08,
+    "stop_hunt_recovery": 0.07,
+    "absorption_strength":0.07,
+    "trap_risk_penalty":  0.08,   # stored as weight; applied as −score×weight
+}
+# Offensive — 30%
+OFF_WEIGHTS: Dict[str, float] = {
+    "displacement_quality":       0.08,
+    "reclaim_acceptance":         0.07,
+    "inefficiency_path":          0.07,
+    "volatility_compression_rel": 0.04,
+    "relative_leadership":        0.04,
 }
 
-# Each engine's required/eligible regime(s) for the regime_fit criterion.
-# Must match the expanded REGIME_ENGINES routing in strategies/__init__.py
-ENGINE_REQUIRED_REGIME: Dict[str, set] = {
-    "S1": {"TREND_UP", "TREND_DOWN"},
-    "S2": {"TREND_UP", "TREND_DOWN"},
-    "S3": {"VOLATILE", "TREND_DOWN", "TREND_UP"},   # expanded July 9
-    "S4": {"RANGE"},
-    "S5": {"TREND_UP", "TREND_DOWN"},
-    "S6": {"RANGE", "FEAR", "TREND_DOWN"},           # expanded July 9
-    "S7": {"RANGE"},
-    "S8": {"TREND_UP", "TREND_DOWN", "RANGE", "VOLATILE", "FEAR", "DEAD"},
-    "S9": {"FEAR", "TREND_DOWN"},                    # expanded July 9
-    "S10": {"RANGE", "VOLATILE", "FEAR", "TREND_DOWN"},  # Gimba Range engine
+ALL_WEIGHTS = {**CORE_WEIGHTS, **DEF_WEIGHTS, **OFF_WEIGHTS}
+
+# ── Engine regime eligibility ─────────────────────────────────────────────────
+ENGINE_REGIMES: Dict[str, set] = {
+    "S1":        {"TREND_UP", "TREND_DOWN"},
+    "S2":        {"TREND_UP", "TREND_DOWN"},
+    "S3":        {"VOLATILE", "TREND_DOWN", "TREND_UP"},
+    "S4":        {"RANGE"},
+    "S5":        {"TREND_UP", "TREND_DOWN"},
+    "S6":        {"RANGE", "FEAR", "TREND_DOWN"},
+    "S7":        {"RANGE"},
+    "S8":        {"TREND_UP", "TREND_DOWN", "RANGE", "VOLATILE", "FEAR", "DEAD"},
+    "S9":        {"FEAR", "TREND_DOWN"},
+    "S10":       {"RANGE", "VOLATILE", "FEAR", "TREND_DOWN"},
+    "RTS_LIQ":   {"TREND_UP", "TREND_DOWN", "RANGE", "VOLATILE", "FEAR", "DEAD"},
+    "RTS_BOS":   {"TREND_UP", "TREND_DOWN", "RANGE", "VOLATILE", "FEAR", "DEAD"},
+    "RTS_CHOCH": {"TREND_UP", "TREND_DOWN", "RANGE", "VOLATILE", "FEAR", "DEAD"},
+    "RTS_ZONE":  {"TREND_UP", "TREND_DOWN", "RANGE", "VOLATILE", "FEAR", "DEAD"},
+    "RTS_DELTA": {"TREND_UP", "TREND_DOWN", "RANGE", "VOLATILE", "FEAR", "DEAD"},
+    "RTS_BOTTLE":{"TREND_UP", "TREND_DOWN", "RANGE", "VOLATILE", "FEAR", "DEAD"},
 }
 
-RR_CAP = 4.0        # R:R normalization cap
-MIN_RR = 2.0        # hard gate
-VOLUME_CAP = 3.0    # volume_ratio normalization cap
 LEARNING_RATE = 0.01
 
-# MTF multipliers — CONFLICT loosened to 0.88 for counter-trend engines (July 9)
-# Trend engines (S1/S2/S5) still receive hard CONFLICT penalty via Remi kill
-MTF_MULTIPLIERS = {"FULL": 1.20, "PARTIAL": 1.00, "CONFLICT": 0.88}
-SCORE_CAP = 0.99
-
-GRADE_THRESHOLDS = [
-    ("S", 0.88),
-    ("A", 0.75),
-    ("B", 0.60),
-    ("C", 0.45),
-]
-
-
-class ConvictionScorer:
-    """Grades raw strategy signals on a unified 0-1 conviction scale.
-
-    Attributes:
-        models_dir: Directory holding per-engine weight JSON files.
-    """
-
-    def __init__(self, models_dir: Optional[Path] = None) -> None:
-        """Initialize the scorer.
-
-        Args:
-            models_dir: Override directory for per-engine weight files.
-        """
-        self.models_dir = models_dir or MODELS_DIR
-        self.models_dir.mkdir(parents=True, exist_ok=True)
-
-    # ------------------------------------------------------------------
-    # Weight persistence
-    # ------------------------------------------------------------------
-    def _weights_path(self, engine: str) -> Path:
-        """Path to an engine's persisted weight file."""
-        safe = str(engine).replace("/", "_")
-        return self.models_dir / f"scorer_weights_{safe}.json"
-
-    def load_weights(self, engine: str) -> Dict[str, float]:
-        """Load per-engine weights, falling back to :data:`BASE_WEIGHTS`.
-
-        Args:
-            engine: Engine identifier (e.g. ``"S1"``).
-
-        Returns:
-            Weight dict keyed by criterion name.
-        """
-        path = self._weights_path(engine)
-        if path.exists():
-            try:
-                data = json.loads(path.read_text())
-                # Only accept known criteria; fill any gaps from defaults.
-                weights = {k: float(data.get(k, BASE_WEIGHTS[k])) for k in BASE_WEIGHTS}
-                return weights
-            except (json.JSONDecodeError, OSError, ValueError, TypeError) as exc:
-                logger.warning("Bad weight file for %s (%s) — using defaults.",
-                               engine, exc)
-        return dict(BASE_WEIGHTS)
-
-    def _save_weights(self, engine: str, weights: Dict[str, float]) -> None:
-        """Persist an engine's weight dict."""
-        try:
-            self._weights_path(engine).write_text(json.dumps(weights, indent=2))
-        except OSError as exc:
-            logger.error("Failed to save weights for %s: %s", engine, exc)
-
-    # ------------------------------------------------------------------
-    # Criterion sub-scores (each returns 0.0-1.0)
-    # ------------------------------------------------------------------
-    @staticmethod
-    def _rr_value(signal: Dict[str, Any]) -> float:
-        """Raw R:R ratio = reward/risk. Returns 0.0 on degenerate inputs."""
-        try:
-            entry = float(signal["entry"])
-            sl = float(signal["sl"])
-            tp = float(signal["tp"])
-        except (KeyError, TypeError, ValueError):
-            return 0.0
-        risk = abs(entry - sl)
-        reward = abs(tp - entry)
-        if risk <= 0:
-            return 0.0
-        return reward / risk
-
-    def _score_rr(self, signal: Dict[str, Any]) -> float:
-        """Normalize R:R to [0,1], capped at R:R = :data:`RR_CAP`."""
-        return min(self._rr_value(signal) / RR_CAP, 1.0)
-
-    @staticmethod
-    def _score_structure(signal: Dict[str, Any]) -> float:
-        """Pass-through of the engine's structure_quality (clamped 0-1)."""
-        return float(min(max(signal.get("structure_quality", 0.0), 0.0), 1.0))
-
-    @staticmethod
-    def _score_ai_st(signal: Dict[str, Any]) -> float:
-        """1.0 if bias matches AI ST direction, 0.5 neutral, 0.0 conflict."""
-        bias = str(signal.get("bias", "")).upper()
-        direction = str(signal.get("ai_st_direction", "")).upper()
-        want_up = bias == "LONG"
-        st_up = direction == "UP"
-        st_down = direction == "DOWN"
-        if not (st_up or st_down):
-            return 0.5  # neutral / unknown
-        if (want_up and st_up) or ((not want_up) and st_down):
-            return 1.0
-        return 0.0
-
-    @staticmethod
-    def _score_volume(signal: Dict[str, Any]) -> float:
-        """Volume quality: neutral at 1.0x avg, rewarded above, not punished below.
-
-        Below 0.5x = 0.3 floor (not dead, just weak)
-        0.5-1.0x   = scales 0.3-0.6 (normal range)
-        1.0-3.0x   = scales 0.6-1.0 (above average = edge)
-        Above 3.0x = capped at 1.0
-        """
-        try:
-            vr = float(signal.get("volume_ratio", 1.0))
-        except (TypeError, ValueError):
-            vr = 1.0
-        vr = max(vr, 0.0)
-        if vr >= VOLUME_CAP:
-            return 1.0
-        if vr >= 1.0:
-            return 0.6 + 0.4 * ((vr - 1.0) / (VOLUME_CAP - 1.0))
-        if vr >= 0.5:
-            return 0.3 + 0.3 * ((vr - 0.5) / 0.5)
-        return 0.3  # floor — low volume, not zero
-
-    @staticmethod
-    def _score_regime(signal: Dict[str, Any]) -> float:
-        """1.0 if the classified regime is in the engine's eligible set."""
-        engine = str(signal.get("engine", "")).upper()
-        regime = str(signal.get("regime", "")).upper()
-        allowed = ENGINE_REQUIRED_REGIME.get(engine)
-        if allowed is None:
-            return 0.5  # unknown engine — neutral
-        return 1.0 if regime in allowed else 0.0
-
-    @staticmethod
-    def _score_rsi(signal: Dict[str, Any]) -> float:
-        """RSI quality — engine-aware.
-
-        Trend engines (S1/S2/S5): momentum-friendly.
-          LONG: RSI 40-65 = 0.8 (trend continuation zone), <30 = 1.0 (oversold snap),
-                >70 = 0.4 (extended but not dead)
-          SHORT: mirror image
-        Reversal/range engines (S4/S6/S7/S9/S10): classic mean-reversion.
-          LONG favors oversold, SHORT favors overbought.
-        """
-        try:
-            rsi = float(signal.get("rsi", 50.0))
-        except (TypeError, ValueError):
-            rsi = 50.0
-        rsi = min(max(rsi, 0.0), 100.0)
-        bias = str(signal.get("bias", "")).upper()
-        engine = str(signal.get("engine", "")).upper()
-        trend_engines = {"S1", "S2", "S5"}
-        if engine in trend_engines:
-            # Trend: reward momentum zone, don't punish extended
-            if bias == "LONG":
-                if rsi < 30:   return 1.0   # oversold snap
-                if rsi <= 65:  return 0.8   # healthy trend zone
-                if rsi <= 75:  return 0.6   # extended but valid
-                return 0.4                  # very extended
-            else:  # SHORT
-                if rsi > 70:   return 1.0
-                if rsi >= 35:  return 0.8
-                if rsi >= 25:  return 0.6
-                return 0.4
-        else:
-            # Reversal/range: classic oversold/overbought scoring
-            return (100 - rsi) / 100 if bias == "LONG" else rsi / 100
-
-    @staticmethod
-    def _score_fg(signal: Dict[str, Any]) -> float:
-        """F&G alignment — engine-aware contrarian vs momentum.
-
-        Trend engines (S1/S2/S5): momentum alignment.
-          Greed + LONG = 1.0, Fear + SHORT = 1.0 (riding the wave)
-          Extreme fear + LONG = 0.3 (fighting momentum)
-
-        Reversal/counter-trend engines (S3/S4/S6/S7/S9/S10): contrarian.
-          Extreme Fear (< 25) + LONG = 1.0 (Dragon buys fear)
-          Extreme Greed (> 75) + SHORT = 1.0
-          Neutral zone = 0.5
-        """
-        try:
-            fg = float(signal.get("fg_score", 50))
-        except (TypeError, ValueError):
-            fg = 50.0
-        bias = str(signal.get("bias", "")).upper()
-        engine = str(signal.get("engine", "")).upper()
-        trend_engines = {"S1", "S2", "S5"}
-
-        if engine in trend_engines:
-            # Momentum: ride the crowd
-            if fg < 25:   return 1.0 if bias == "SHORT" else 0.3
-            if fg < 45:   return 0.7 if bias == "SHORT" else 0.4
-            if fg > 75:   return 1.0 if bias == "LONG"  else 0.3
-            if fg > 55:   return 0.7 if bias == "LONG"  else 0.4
-            return 0.5  # neutral zone
-        else:
-            # Contrarian: Dragon buys Extreme Fear
-            if fg < 25:   return 1.0 if bias == "LONG"  else 0.2
-            if fg < 40:   return 0.7 if bias == "LONG"  else 0.4
-            if fg > 75:   return 1.0 if bias == "SHORT" else 0.2
-            if fg > 60:   return 0.7 if bias == "SHORT" else 0.4
-            return 0.5  # neutral zone
-
-    # ------------------------------------------------------------------
-    # Public API
-    # ------------------------------------------------------------------
-    @staticmethod
-    def _grade(score: float) -> str:
-        """Map a 0-1 score to a letter grade."""
-        for grade, threshold in GRADE_THRESHOLDS:
-            if score >= threshold:
-                return grade
-        return "F"
-
-    def score(self, signal: Dict[str, Any]) -> Dict[str, Any]:
-        """Score a raw signal and return grade + breakdown.
-
-        Args:
-            signal: Raw signal dict (see module docstring / task spec for the
-                expected keys).
-
-        Returns:
-            Dict with ``score`` (float), ``grade`` (str), and ``breakdown``
-            (per-criterion contributions, weights, R:R, MTF multiplier). On the
-            hard 2R gate it returns grade ``F`` / score ``0.0`` with a reason.
-        """
-        engine = str(signal.get("engine", "S1")).upper()
-
-        # Hard 2R gate — reject before any scoring work.
-        rr = self._rr_value(signal)
-        if rr < MIN_RR:
-            logger.info("%s %s gated: R:R=%.2f < %.1f",
-                        signal.get("pair"), engine, rr, MIN_RR)
-            return {
-                "score": 0.0,
-                "grade": "F",
-                "reason": "RR_BELOW_MINIMUM",
-                "breakdown": {"rr_ratio": round(rr, 3)},
-            }
-
-        weights = self.load_weights(engine)
-        sub_scores = {
-            "rr_ratio": self._score_rr(signal),
-            "structure_quality": self._score_structure(signal),
-            "ai_st_alignment": self._score_ai_st(signal),
-            "volume_ratio": self._score_volume(signal),
-            "regime_fit": self._score_regime(signal),
-            "rsi_quality": self._score_rsi(signal),
-            "fg_alignment": self._score_fg(signal),
-        }
-
-        base_score = sum(weights[k] * sub_scores[k] for k in BASE_WEIGHTS)
-
-        # S8 MTF multiplier applied after the base score.
-        mtf = str(signal.get("mtf_alignment", "PARTIAL")).upper()
-        mult = MTF_MULTIPLIERS.get(mtf, 1.00)
-        final_score = min(base_score * mult, SCORE_CAP)
-
-        grade = self._grade(final_score)
-        contributions = {k: round(weights[k] * sub_scores[k], 4) for k in BASE_WEIGHTS}
-
-        result = {
-            "score": round(final_score, 4),
-            "grade": grade,
-            "breakdown": {
-                "rr": round(rr, 3),
-                "base_score": round(base_score, 4),
-                "mtf_alignment": mtf,
-                "mtf_multiplier": mult,
-                "sub_scores": {k: round(v, 4) for k, v in sub_scores.items()},
-                "weights": {k: round(weights[k], 4) for k in BASE_WEIGHTS},
-                "contributions": contributions,
-            },
-        }
-        logger.info("%s %s -> %s (%.3f) [base=%.3f mtf=%s x%.2f]",
-                    signal.get("pair"), engine, grade, final_score,
-                    base_score, mtf, mult)
-        return result
-
-    def update_weights(self, signal: Dict[str, Any], outcome: bool) -> Dict[str, float]:
-        """Nudge an engine's weights toward criteria that predicted the outcome.
-
-        Simple online gradient step: for a winning trade (``outcome=True``) we
-        push weights up on criteria that scored high and down on those that
-        scored low; for a loss we do the reverse. Weights are clamped to
-        [0, 1] then renormalized to sum to 1.0 and persisted.
-
-        Args:
-            signal: The original signal dict that was traded.
-            outcome: True if the trade was a win, False if a loss.
-
-        Returns:
-            The updated (normalized) weight dict.
-        """
-        engine = str(signal.get("engine", "S1")).upper()
-        weights = self.load_weights(engine)
-        sub_scores = {
-            "rr_ratio": self._score_rr(signal),
-            "structure_quality": self._score_structure(signal),
-            "ai_st_alignment": self._score_ai_st(signal),
-            "volume_ratio": self._score_volume(signal),
-            "regime_fit": self._score_regime(signal),
-            "rsi_quality": self._score_rsi(signal),
-            "fg_alignment": self._score_fg(signal),
-        }
-        # Error term: +1 for a win, -1 for a loss. Criteria centered at 0.5 so a
-        # criterion that was "on" (>0.5) gets reinforced on wins.
-        sign = 1.0 if outcome else -1.0
-        for k in weights:
-            grad = sign * (sub_scores[k] - 0.5)
-            weights[k] = weights[k] + LEARNING_RATE * grad
-
-        # Clamp and renormalize.
-        for k in weights:
-            weights[k] = max(0.0, min(weights[k], 1.0))
-        total = sum(weights.values()) or 1.0
-        weights = {k: v / total for k, v in weights.items()}
-
-        self._save_weights(engine, weights)
-        logger.info("Updated %s weights (outcome=%s): %s",
-                    engine, outcome, {k: round(v, 3) for k, v in weights.items()})
-        return weights
-
-
-if __name__ == "__main__":
-    logger.info("=== ConvictionScorer demo ===")
-    scorer = ConvictionScorer()
-
-    demo_signals = [
-        {  # Strong BTC short in fear-driven downtrend, full MTF alignment.
-            "pair": "BTC", "bias": "SHORT", "engine": "S1", "regime": "TREND_DOWN",
-            "entry": 61000, "sl": 61800, "tp": 58600, "rsi": 68,
-            "volume_ratio": 2.5, "ai_st_direction": "DOWN", "ai_st_strength": 0.9,
-            "mtf_alignment": "FULL", "structure_quality": 0.85, "fg_score": 22,
-        },
-        {  # SOL long, trend up, partial MTF.
-            "pair": "SOL", "bias": "LONG", "engine": "S2", "regime": "TREND_UP",
-            "entry": 81.0, "sl": 78.5, "tp": 87.0, "rsi": 40,
-            "volume_ratio": 1.8, "ai_st_direction": "UP", "ai_st_strength": 0.8,
-            "mtf_alignment": "PARTIAL", "structure_quality": 0.7, "fg_score": 55,
-        },
-        {  # XRP long but R:R below 2.0 -> hard gate.
-            "pair": "XRP", "bias": "LONG", "engine": "S1", "regime": "TREND_UP",
-            "entry": 1.10, "sl": 1.05, "tp": 1.17, "rsi": 45,
-            "volume_ratio": 1.2, "ai_st_direction": "UP", "ai_st_strength": 0.6,
-            "mtf_alignment": "PARTIAL", "structure_quality": 0.6, "fg_score": 55,
-        },
-        {  # XRP long, regime conflict (RANGE engine? no — S1 needs trend), CONFLICT MTF.
-            "pair": "XRP", "bias": "LONG", "engine": "S1", "regime": "RANGE",
-            "entry": 1.10, "sl": 1.06, "tp": 1.20, "rsi": 52,
-            "volume_ratio": 0.9, "ai_st_direction": "DOWN", "ai_st_strength": 0.5,
-            "mtf_alignment": "CONFLICT", "structure_quality": 0.4, "fg_score": 55,
-        },
-    ]
-
-    for sig in demo_signals:
-        res = scorer.score(sig)
-        reason = f" reason={res['reason']}" if "reason" in res else ""
-        print(f"{sig['pair']:5s} {sig['engine']} {sig['bias']:5s} "
-              f"-> grade={res['grade']} score={res['score']:.3f}{reason}")
-
-    # Demonstrate weight learning on a temp engine (won't clobber real weights).
-    print("\nWeight learning demo (engine=DEMO):")
-    demo_sig = dict(demo_signals[0])
-    demo_sig["engine"] = "DEMO"
-    before = scorer.load_weights("DEMO")
-    scorer.update_weights(demo_sig, outcome=True)
-    after = scorer.load_weights("DEMO")
-    for k in BASE_WEIGHTS:
-        print(f"  {k:20s} {before[k]:.4f} -> {after[k]:.4f}")
-    # Clean up the demo weights file.
-    (MODELS_DIR / "scorer_weights_DEMO.json").unlink(missing_ok=True)
-
 
 # ══════════════════════════════════════════════════════════════════════════════
-# V2 SHADOW SCORER — Phase 1 (non-destructive)
-# Computes defensive_score, offensive_score, and conviction_v2 as shadow fields.
-# Does NOT replace live conviction or grade. Runs after the main score().
+# Helper — safe float
 # ══════════════════════════════════════════════════════════════════════════════
-
-def _safe_v2(val, default: float = 0.5) -> float:
-    """Normalize a raw field to 0-1, returning default if missing/None/NaN."""
+def _sf(val: Any, default: float = 0.5) -> float:
     if val is None:
         return default
     try:
-        import math
         f = float(val)
         return default if (math.isnan(f) or math.isinf(f)) else max(0.0, min(1.0, f))
     except (TypeError, ValueError):
         return default
 
 
-def score_v2_shadow(signal: dict) -> dict:
-    """Compute V2 defensive + offensive shadow scores.
+# ══════════════════════════════════════════════════════════════════════════════
+class ConvictionScorer:
+    """JHL V2 conviction scorer — 8-factor, 3-bucket, bonus up to 3×."""
 
-    Uses the raw microstructure fields attached by microstructure.enrich().
-    Returns a dict with:
-        defensive_score     0-1
-        offensive_score     0-1
-        trap_risk           0-1  (higher = more dangerous)
-        conviction_v2       0-1  (shadow — not live)
-        v2_action           EXECUTE | WAIT | REJECT  (shadow)
-        v2_reasons          list[str]
+    def __init__(self, models_dir: Optional[Path] = None) -> None:
+        self.models_dir = models_dir or MODELS_DIR
+        self.models_dir.mkdir(parents=True, exist_ok=True)
 
-    All fields prefixed v2_ or named *_score to avoid collision with V1.
-    """
-    s = signal  # shorthand
+    # ── Weight persistence ────────────────────────────────────────────────────
+    def _weights_path(self, engine: str) -> Path:
+        return self.models_dir / f"scorer_weights_{engine.replace('/', '_')}.json"
 
-    # ── Raw field extraction ─────────────────────────────────────────────────
-    sweep_detected        = bool(s.get("sweep_detected", False))
-    sweep_depth           = _safe_v2(s.get("sweep_depth"), 0.0)
-    reclaim_close_ratio   = _safe_v2(s.get("reclaim_close_ratio"), 0.0)
-    acceptance_bars       = min(int(s.get("acceptance_bars") or 0), 5) / 5.0
-    absorption_count      = min(int(s.get("absorption_count") or 0), 5) / 5.0
-    absorption_vol_ratio  = _safe_v2(s.get("absorption_volume_ratio"), 0.3)
-    displacement_quality  = _safe_v2(s.get("displacement_quality"), 0.5)
-    follow_through_ratio  = _safe_v2(s.get("follow_through_ratio"), 0.5)
-    reclaim_acceptance    = _safe_v2(s.get("reclaim_close_ratio"), 0.0)  # reuse
-    inefficiency_path     = _safe_v2(s.get("inefficiency_path"), 0.5)
-    compression_ratio     = _safe_v2(s.get("compression_ratio"), 0.5)
-    relative_leadership   = _safe_v2(s.get("relative_leadership"), 0.5)
-    liq_cluster_dist      = _safe_v2(s.get("liquidation_cluster_distance"), 1.0)
-    equal_highs_dist      = _safe_v2(s.get("equal_highs_distance"), 1.0)
-    equal_lows_dist       = _safe_v2(s.get("equal_lows_distance"), 1.0)
+    def load_weights(self, engine: str) -> Dict[str, float]:
+        path = self._weights_path(engine)
+        if path.exists():
+            try:
+                data = json.loads(path.read_text())
+                return {k: float(data.get(k, ALL_WEIGHTS[k])) for k in ALL_WEIGHTS}
+            except Exception as exc:
+                logger.warning("Bad weight file %s: %s", engine, exc)
+        return dict(ALL_WEIGHTS)
 
-    bias = str(s.get("bias", "LONG")).upper()
+    def _save_weights(self, engine: str, w: Dict[str, float]) -> None:
+        try:
+            self._weights_path(engine).write_text(json.dumps(w, indent=2))
+        except OSError as exc:
+            logger.error("Save weights %s: %s", engine, exc)
 
-    # ── DEFENSIVE SCORE ──────────────────────────────────────────────────────
-    # LIQUIDITY_SWEEP_QUALITY: reward sweep + strong reclaim
-    if sweep_detected:
-        sweep_quality = sweep_depth * 0.4 + reclaim_close_ratio * 0.6
-    else:
-        sweep_quality = 0.3  # no sweep detected = neutral (not penalized yet)
+    # ── R:R ───────────────────────────────────────────────────────────────────
+    @staticmethod
+    def _rr(sig: Dict[str, Any]) -> float:
+        try:
+            e, sl, tp = float(sig["entry"]), float(sig["sl"]), float(sig["tp"])
+        except (KeyError, TypeError, ValueError):
+            return 0.0
+        risk = abs(e - sl)
+        return abs(tp - e) / risk if risk > 0 else 0.0
 
-    # STOP_HUNT_RECOVERY: reclaim + acceptance bars
-    stop_hunt_recovery = reclaim_close_ratio * 0.5 + acceptance_bars * 0.5
+    # ── Core sub-scores (each 0-1) ────────────────────────────────────────────
+    @staticmethod
+    def _structure_break(sig: Dict[str, Any]) -> float:
+        return _sf(sig.get("structure_quality"), 0.5)
 
-    # ABSORPTION_STRENGTH: absorption count + volume weight
-    absorption_strength = absorption_count * 0.5 + absorption_vol_ratio * 0.5
+    @staticmethod
+    def _htf_bias(sig: Dict[str, Any]) -> float:
+        bias = str(sig.get("bias", "")).upper()
+        direction = str(sig.get("ai_st_direction", "")).upper()
+        if not direction or direction == "NONE":
+            return 0.5
+        aligned = (bias == "LONG" and direction == "UP") or \
+                  (bias == "SHORT" and direction == "DOWN")
+        return 1.0 if aligned else 0.0
 
-    # TRAP_RISK: proximity to liquidation magnets (close = high trap risk)
-    # Bias-aware: LONG entries near equal highs = bearish magnet overhead
-    if bias == "LONG":
-        trap_proximity = 1.0 - equal_highs_dist   # close to equal highs = trapped
-    else:
-        trap_proximity = 1.0 - equal_lows_dist    # close to equal lows = trapped
-    trap_risk = trap_proximity * 0.6 + (1.0 - liq_cluster_dist) * 0.4
+    @staticmethod
+    def _momentum_align(sig: Dict[str, Any]) -> float:
+        """Ribbon 25/50/100/200 alignment + AI ST strength as momentum proxy."""
+        # Prefer explicit ribbon_score if engine computed it
+        if "ribbon_score" in sig:
+            return _sf(sig["ribbon_score"])
+        # Fallback: RSI momentum proxy (engine-aware)
+        try:
+            rsi = float(sig.get("rsi", 50.0))
+        except (TypeError, ValueError):
+            rsi = 50.0
+        bias = str(sig.get("bias", "")).upper()
+        engine = str(sig.get("engine", "")).upper()
+        trend = engine in {"S1", "S2", "S5"}
+        if trend:
+            return ((100 - rsi) / 100) if bias == "SHORT" else (rsi / 100)
+        return ((100 - rsi) / 100) if bias == "LONG" else (rsi / 100)
 
-    # Defensive composite (TRAP_RISK inverted — high trap = low defensive)
-    defensive_score = (
-        sweep_quality       * 0.30 +
-        stop_hunt_recovery  * 0.25 +
-        absorption_strength * 0.20 +
-        (1.0 - trap_risk)   * 0.25
-    )
+    @staticmethod
+    def _ob_proximity(sig: Dict[str, Any]) -> float:
+        """Order-block / structure proximity — 1.0 = at OB, 0.5 = unknown."""
+        return _sf(sig.get("ob_proximity", sig.get("order_block_proximity")), 0.5)
 
-    # ── OFFENSIVE SCORE ──────────────────────────────────────────────────────
-    # DISPLACEMENT_QUALITY
-    # RECLAIM_ACCEPTANCE (proxy via reclaim_close_ratio + acceptance_bars)
-    reclaim_accept = reclaim_close_ratio * 0.6 + acceptance_bars * 0.4
+    # ── Defensive sub-scores ──────────────────────────────────────────────────
+    @staticmethod
+    def _liq_sweep_quality(sig: Dict[str, Any]) -> float:
+        if "liq_sweep_quality" in sig:
+            return _sf(sig["liq_sweep_quality"])
+        swept = bool(sig.get("sweep_detected", False))
+        depth = _sf(sig.get("sweep_depth"), 0.0)
+        reclaim = _sf(sig.get("reclaim_close_ratio"), 0.0)
+        if swept:
+            return depth * 0.4 + reclaim * 0.6
+        return 0.30  # no sweep = neutral, not zero
 
-    # INEFFICIENCY_PATH: clean air to TP
-    # VOLATILITY_COMPRESSION_RELEASE: compressed = ready to expand
-    # RELATIVE_LEADERSHIP: this pair leading the universe
+    @staticmethod
+    def _stop_hunt_recovery(sig: Dict[str, Any]) -> float:
+        if "stop_hunt_recovery" in sig:
+            return _sf(sig["stop_hunt_recovery"])
+        reclaim = _sf(sig.get("reclaim_close_ratio"), 0.0)
+        accept  = min(int(sig.get("acceptance_bars") or 0), 5) / 5.0
+        return reclaim * 0.5 + accept * 0.5
 
-    offensive_score = (
-        displacement_quality * 0.25 +
-        reclaim_accept       * 0.20 +
-        inefficiency_path    * 0.20 +
-        compression_ratio    * 0.15 +
-        relative_leadership  * 0.20
-    )
+    @staticmethod
+    def _absorption_strength(sig: Dict[str, Any]) -> float:
+        if "absorption_strength" in sig:
+            return _sf(sig["absorption_strength"])
+        count = min(int(sig.get("absorption_count") or 0), 5) / 5.0
+        vol   = _sf(sig.get("absorption_volume_ratio"), 0.3)
+        # Fallback: simple volume ratio
+        try:
+            vr = float(sig.get("volume_ratio", 1.0))
+        except (TypeError, ValueError):
+            vr = 1.0
+        vol_proxy = min(vr / 3.0, 1.0)
+        return count * 0.4 + max(vol, vol_proxy) * 0.6
 
-    # ── V2 BASE SCORE ────────────────────────────────────────────────────────
-    # Pull V1 core structure score (structure_quality + rr as proxy)
-    structure_quality = _safe_v2(s.get("structure_quality"), 0.5)
-    rr = float(s.get("rr") or 2.0)
-    rr_norm = min(max((rr - 2.0) / 2.0, 0.0), 1.0)
-    htf_bias = _safe_v2(
-        s.get("score_components", {}).get("HTF_BIAS") if s.get("score_components") else None,
-        0.5
-    )
-    momentum = _safe_v2(
-        s.get("score_components", {}).get("MOMENTUM_ALIGN") if s.get("score_components") else None,
-        0.5
-    )
-    core_structure = (structure_quality * 0.35 + htf_bias * 0.35 + momentum * 0.20 + rr_norm * 0.10)
+    @staticmethod
+    def _trap_risk(sig: Dict[str, Any]) -> float:
+        """Higher = more dangerous. Applied as penalty."""
+        if "trap_risk" in sig:
+            return _sf(sig["trap_risk"])
+        bias = str(sig.get("bias", "LONG")).upper()
+        eq_high = _sf(sig.get("equal_highs_distance"), 1.0)
+        eq_low  = _sf(sig.get("equal_lows_distance"),  1.0)
+        liq     = _sf(sig.get("liquidation_cluster_distance"), 1.0)
+        prox = (1.0 - eq_high) if bias == "LONG" else (1.0 - eq_low)
+        return prox * 0.6 + (1.0 - liq) * 0.4
 
-    base_v2 = (core_structure * 0.40 + defensive_score * 0.30 + offensive_score * 0.30)
+    # ── Offensive sub-scores ──────────────────────────────────────────────────
+    @staticmethod
+    def _displacement_quality(sig: Dict[str, Any]) -> float:
+        if "displacement_quality" in sig:
+            return _sf(sig["displacement_quality"])
+        body  = _sf(sig.get("impulse_body_ratio"), 0.5)
+        follow= _sf(sig.get("follow_through_ratio"), 0.5)
+        return body * 0.5 + follow * 0.5
 
-    # MTF multiplier (same as V1)
-    mtf = str(s.get("mtf_verdict", "PARTIAL")).upper()
-    from conviction_scorer import MTF_MULTIPLIERS
-    mult = MTF_MULTIPLIERS.get(mtf, 1.00)
-    conviction_v2 = min(base_v2 * mult, 0.99)
+    @staticmethod
+    def _reclaim_acceptance(sig: Dict[str, Any]) -> float:
+        if "reclaim_acceptance" in sig:
+            return _sf(sig["reclaim_acceptance"])
+        reclaim = _sf(sig.get("reclaim_close_ratio"), 0.5)
+        accept  = min(int(sig.get("acceptance_bars") or 0), 5) / 5.0
+        return reclaim * 0.6 + accept * 0.4
 
-    # ── V2 ACTION ────────────────────────────────────────────────────────────
-    reasons = []
-    if defensive_score >= 0.72 and offensive_score >= 0.68 and trap_risk < 0.55:
-        v2_action = "EXECUTE"
-        if sweep_detected:
-            reasons.append("sweep+reclaim confirmed")
-        if displacement_quality >= 0.70:
-            reasons.append("strong displacement")
-        if inefficiency_path >= 0.75:
-            reasons.append("clean path to TP")
-    elif trap_risk >= 0.70:
-        v2_action = "REJECT"
-        reasons.append(f"trap risk high ({trap_risk:.2f})")
-        if bias == "LONG" and equal_highs_dist < 0.3:
-            reasons.append("equal highs overhead")
-        elif bias == "SHORT" and equal_lows_dist < 0.3:
-            reasons.append("equal lows below")
-    elif offensive_score < 0.50 and defensive_score < 0.55:
-        v2_action = "REJECT"
-        reasons.append("weak defensive + offensive — likely trap")
-    else:
-        v2_action = "WAIT"
-        if not sweep_detected:
-            reasons.append("no sweep/reclaim yet")
-        if reclaim_close_ratio < 0.40:
-            reasons.append("reclaim not confirmed")
-        if offensive_score < 0.68:
-            reasons.append(f"offensive weak ({offensive_score:.2f})")
+    @staticmethod
+    def _inefficiency_path(sig: Dict[str, Any]) -> float:
+        if "inefficiency_path" in sig:
+            return _sf(sig["inefficiency_path"])
+        # Proxy: clean R:R beyond 2.5 = cleaner air
+        try:
+            rr = float(sig.get("rr", 2.0))
+        except (TypeError, ValueError):
+            rr = 2.0
+        return min((rr - 2.0) / 2.0, 1.0) * 0.5 + 0.5  # 0.5 floor
 
-    return {
-        "defensive_score": round(defensive_score, 4),
-        "offensive_score": round(offensive_score, 4),
-        "trap_risk": round(trap_risk, 4),
-        "conviction_v2": round(conviction_v2, 4),
-        "v2_action": v2_action,
-        "v2_reasons": reasons,
-        # Sub-components for display
-        "v2_sweep_quality": round(sweep_quality, 3),
-        "v2_stop_hunt_recovery": round(stop_hunt_recovery, 3),
-        "v2_absorption": round(absorption_strength, 3),
-        "v2_displacement": round(displacement_quality, 3),
-        "v2_reclaim_accept": round(reclaim_accept, 3),
-        "v2_path": round(inefficiency_path, 3),
-        "v2_compression": round(compression_ratio, 3),
-        "v2_leadership": round(relative_leadership, 3),
-    }
+    @staticmethod
+    def _volatility_compression(sig: Dict[str, Any]) -> float:
+        if "volatility_compression_rel" in sig:
+            return _sf(sig["volatility_compression_rel"])
+        return _sf(sig.get("compression_ratio"), 0.5)
+
+    @staticmethod
+    def _relative_leadership(sig: Dict[str, Any]) -> float:
+        if "relative_leadership" in sig:
+            return _sf(sig["relative_leadership"])
+        return _sf(sig.get("relative_atr_rank", sig.get("relative_volume_rank")), 0.5)
+
+    # ── Composite scores ──────────────────────────────────────────────────────
+    def _core_score(self, sig: Dict[str, Any], w: Dict[str, float]) -> float:
+        raw = (
+            w["structure_break"] * self._structure_break(sig) +
+            w["htf_bias"]        * self._htf_bias(sig) +
+            w["momentum_align"]  * self._momentum_align(sig) +
+            w["ob_proximity"]    * self._ob_proximity(sig)
+        )
+        total_w = w["structure_break"] + w["htf_bias"] + w["momentum_align"] + w["ob_proximity"]
+        return raw / total_w if total_w > 0 else 0.5
+
+    def _defensive_score(self, sig: Dict[str, Any], w: Dict[str, float]) -> float:
+        pos = (
+            w["liq_sweep_quality"]   * self._liq_sweep_quality(sig) +
+            w["stop_hunt_recovery"]  * self._stop_hunt_recovery(sig) +
+            w["absorption_strength"] * self._absorption_strength(sig)
+        )
+        penalty = w["trap_risk_penalty"] * self._trap_risk(sig)
+        raw = pos - penalty
+        # Normalize to 0-1 band
+        max_possible = w["liq_sweep_quality"] + w["stop_hunt_recovery"] + w["absorption_strength"]
+        return max(0.0, min(raw / max_possible if max_possible > 0 else 0.5, 1.0))
+
+    def _offensive_score(self, sig: Dict[str, Any], w: Dict[str, float]) -> float:
+        total_w = sum(OFF_WEIGHTS.values())
+        raw = (
+            w["displacement_quality"]       * self._displacement_quality(sig) +
+            w["reclaim_acceptance"]         * self._reclaim_acceptance(sig) +
+            w["inefficiency_path"]          * self._inefficiency_path(sig) +
+            w["volatility_compression_rel"] * self._volatility_compression(sig) +
+            w["relative_leadership"]        * self._relative_leadership(sig)
+        )
+        return max(0.0, min(raw / total_w if total_w > 0 else 0.5, 1.0))
+
+    # ── F&G alignment (context modifier, not a weighted bucket criterion) ─────
+    @staticmethod
+    def _fg_modifier(sig: Dict[str, Any]) -> float:
+        """Returns a small ±0.03 multiplier nudge based on F&G alignment."""
+        try:
+            fg = float(sig.get("fg_score", 50))
+        except (TypeError, ValueError):
+            fg = 50.0
+        bias   = str(sig.get("bias", "")).upper()
+        engine = str(sig.get("engine", "")).upper()
+        trend  = engine in {"S1", "S2", "S5"}
+        if trend:
+            if fg < 25:  return  0.03 if bias == "SHORT" else -0.02
+            if fg > 75:  return  0.03 if bias == "LONG"  else -0.02
+        else:
+            if fg < 25:  return  0.03 if bias == "LONG"  else -0.02
+            if fg > 75:  return  0.03 if bias == "SHORT" else -0.02
+        return 0.0
+
+    # ── Regime fit gate ───────────────────────────────────────────────────────
+    @staticmethod
+    def _regime_ok(sig: Dict[str, Any]) -> bool:
+        engine = str(sig.get("engine", "")).upper()
+        regime = str(sig.get("regime", "")).upper()
+        allowed = ENGINE_REGIMES.get(engine)
+        if allowed is None:
+            return True   # unknown engine — pass through
+        return regime in allowed
+
+    # ── Bonus system (up to 3×) ───────────────────────────────────────────────
+    def _compute_bonus(
+        self,
+        sig: Dict[str, Any],
+        def_score: float,
+        off_score: float,
+    ) -> float:
+        """Stack offensive + defensive premiums. Cap at MAX_BONUS_MULT."""
+        bonus = 1.0   # start at 1× (no bonus)
+        reasons: List[str] = []
+
+        # Offensive premium triggers
+        if self._displacement_quality(sig)  >= 0.85:
+            bonus += 0.30; reasons.append("elite_displacement")
+        if self._reclaim_acceptance(sig)    >= 0.82:
+            bonus += 0.25; reasons.append("strong_reclaim")
+        if self._inefficiency_path(sig)     >= 0.80:
+            bonus += 0.20; reasons.append("clean_air_path")
+        if self._volatility_compression(sig)>= 0.80:
+            bonus += 0.15; reasons.append("compression_release")
+        if self._relative_leadership(sig)   >= 0.82:
+            bonus += 0.15; reasons.append("pair_leadership")
+        if _sf(sig.get("liquidation_chain_potential"), 0.0) >= 0.75:
+            bonus += 0.20; reasons.append("liquidation_chain")
+
+        # Defensive premium triggers
+        if self._stop_hunt_recovery(sig)    >= 0.85:
+            bonus += 0.25; reasons.append("stop_hunt_recovered")
+        if self._absorption_strength(sig)   >= 0.80:
+            bonus += 0.20; reasons.append("absorption_confirmed")
+        if self._liq_sweep_quality(sig)     >= 0.82:
+            bonus += 0.20; reasons.append("clean_sweep_reclaim")
+
+        # Combo bonuses
+        if def_score >= 0.78 and off_score >= 0.78:
+            bonus += 0.25; reasons.append("def+off_premium_combo")
+        if self._reclaim_acceptance(sig) >= 0.82 and self._displacement_quality(sig) >= 0.85:
+            bonus += 0.20; reasons.append("reclaim+displacement_combo")
+
+        # MTF bonus
+        mtf = str(sig.get("mtf_alignment", "PARTIAL")).upper()
+        if mtf == "FULL":
+            bonus += 0.10; reasons.append("full_mtf")
+
+        final = min(bonus, MAX_BONUS_MULT)
+        sig["_bonus_reasons"] = reasons
+        return final
+
+    # ── Action state ──────────────────────────────────────────────────────────
+    @staticmethod
+    def _action_state(
+        conviction: float,
+        def_score: float,
+        off_score: float,
+        trap: float,
+        sig: Dict[str, Any],
+    ) -> tuple[str, str]:
+        """Returns (action_state, action_reason) per canonical contract."""
+
+        # Hard reject conditions
+        if trap >= 0.75:
+            return "REJECT", f"Trap risk critical ({trap:.2f}) — likely raid terrain"
+        if off_score < 0.35 and def_score < 0.40:
+            return "REJECT", "Weak defensive and offensive — probable trap or fake setup"
+
+        # Execute conditions
+        if def_score >= 0.72 and off_score >= 0.68 and conviction >= FEED_A_THRESHOLD:
+            sweep = bool(sig.get("sweep_detected", False))
+            disp  = _sf(sig.get("displacement_quality"), 0.0)
+            parts = []
+            if sweep:     parts.append("sweep + reclaim confirmed")
+            if disp >= 0.70: parts.append("strong displacement")
+            if not parts: parts.append("structure + gateway alignment green")
+            return "CLICK", "; ".join(parts)
+
+        # Wait conditions
+        parts = []
+        if not sig.get("sweep_detected") and sig.get("rts"):
+            parts.append("sweep not yet confirmed")
+        if _sf(sig.get("reclaim_close_ratio"), 0.5) < 0.40:
+            parts.append("reclaim not confirmed")
+        if off_score < 0.68:
+            parts.append(f"offensive score low ({off_score:.2f})")
+        if conviction < FEED_A_THRESHOLD:
+            parts.append(f"conviction below A threshold ({conviction:.0f})")
+        return "WAIT", "; ".join(parts) if parts else "watching for confirmation"
+
+    # ── Public: score() ───────────────────────────────────────────────────────
+    def score(self, signal: Dict[str, Any]) -> Dict[str, Any]:
+        """Score a signal. Returns conviction 0-100, action_state, action_reason.
+
+        No letter grades are stamped. Feed filters at >=88 (Sammy) and >=75 (A-tier).
+        """
+        engine = str(signal.get("engine", "S1")).upper()
+
+        # Hard 2R gate
+        rr = self._rr(signal)
+        if rr < MIN_RR:
+            logger.info("%s %s gated: R:R=%.2f < %.1f", signal.get("pair"), engine, rr, MIN_RR)
+            return {
+                "score_8": 0,
+                "conviction": 0.0,
+                "action_state": "REJECT",
+                "action_reason": f"R:R {rr:.2f} below minimum {MIN_RR}",
+                "defensive_score": 0.0,
+                "offensive_score": 0.0,
+                "trap_risk": 0.0,
+                "bonus_multiplier": 1.0,
+                "bonus_reasons": [],
+                "breakdown": {"rr": round(rr, 3)},
+            }
+
+        # Regime gate — downgrade, not reject
+        regime_ok = self._regime_ok(signal)
+
+        w = self.load_weights(engine)
+
+        core   = self._core_score(signal, w)
+        def_s  = self._defensive_score(signal, w)
+        off_s  = self._offensive_score(signal, w)
+        trap   = self._trap_risk(signal)
+
+        # Base score (0-1) — three buckets
+        base = 0.40 * core + 0.30 * def_s + 0.30 * off_s
+
+        # F&G context nudge
+        base += self._fg_modifier(signal)
+        base = max(0.0, min(base, 1.0))
+
+        # MTF multiplier
+        mtf  = str(signal.get("mtf_alignment", "PARTIAL")).upper()
+        mult = MTF_MULTIPLIERS.get(mtf, 1.00)
+        if not regime_ok:
+            mult *= 0.80  # regime mismatch penalty, not kill
+
+        after_mtf = min(base * mult, 1.0)
+
+        # Bonus system — multiplied on top
+        bonus = self._compute_bonus(signal, def_s, off_s)
+        # Bonus amplifies distance above 0.5 baseline, doesn't create score from nothing
+        boosted = 0.5 + (after_mtf - 0.5) * bonus if after_mtf > 0.5 else after_mtf
+        final_01 = min(boosted, SCORE_CAP / 100.0)
+
+        conviction_100 = round(final_01 * 100.0, 1)
+        action, reason = self._action_state(conviction_100, def_s, off_s, trap, signal)
+
+        logger.info(
+            "%s %s -> conviction=%.1f action=%s [core=%.3f def=%.3f off=%.3f bonus=%.2f× mtf=%s]",
+            signal.get("pair"), engine, conviction_100, action,
+            core, def_s, off_s, bonus, mtf,
+        )
+
+        return {
+            "score_8":          conviction_100,   # canonical field per snapshot spec
+            "conviction":       conviction_100,
+            "action_state":     action,
+            "action_reason":    reason,
+            "defensive_score":  round(def_s, 4),
+            "offensive_score":  round(off_s, 4),
+            "trap_risk":        round(trap, 4),
+            "bonus_multiplier": round(bonus, 3),
+            "bonus_reasons":    signal.pop("_bonus_reasons", []),
+            "breakdown": {
+                "rr":          round(rr, 3),
+                "core":        round(core, 4),
+                "defensive":   round(def_s, 4),
+                "offensive":   round(off_s, 4),
+                "base":        round(base, 4),
+                "mtf":         mtf,
+                "mtf_mult":    mult,
+                "bonus":       round(bonus, 3),
+                "regime_ok":   regime_ok,
+            },
+        }
+
+    # ── Weight learning ───────────────────────────────────────────────────────
+    def update_weights(self, signal: Dict[str, Any], outcome: bool) -> Dict[str, float]:
+        engine = str(signal.get("engine", "S1")).upper()
+        w = self.load_weights(engine)
+        sub = {
+            "structure_break":         self._structure_break(signal),
+            "htf_bias":                self._htf_bias(signal),
+            "momentum_align":          self._momentum_align(signal),
+            "ob_proximity":            self._ob_proximity(signal),
+            "liq_sweep_quality":       self._liq_sweep_quality(signal),
+            "stop_hunt_recovery":      self._stop_hunt_recovery(signal),
+            "absorption_strength":     self._absorption_strength(signal),
+            "trap_risk_penalty":       self._trap_risk(signal),
+            "displacement_quality":    self._displacement_quality(signal),
+            "reclaim_acceptance":      self._reclaim_acceptance(signal),
+            "inefficiency_path":       self._inefficiency_path(signal),
+            "volatility_compression_rel": self._volatility_compression(signal),
+            "relative_leadership":     self._relative_leadership(signal),
+        }
+        sign = 1.0 if outcome else -1.0
+        for k in w:
+            grad = sign * (sub.get(k, 0.5) - 0.5)
+            w[k] = max(0.0, min(w[k] + LEARNING_RATE * grad, 1.0))
+        total = sum(w.values()) or 1.0
+        w = {k: v / total for k, v in w.items()}
+        self._save_weights(engine, w)
+        return w
+
+
+# ── Module-level convenience ──────────────────────────────────────────────────
+_scorer = None
+
+def score_signal(signal: Dict[str, Any]) -> Dict[str, Any]:
+    """Module-level shortcut used by the scanner pipeline."""
+    global _scorer
+    if _scorer is None:
+        _scorer = ConvictionScorer()
+    return _scorer.score(signal)
+
+
+def is_sammy(conviction: float) -> bool:
+    """True if conviction reaches the S-tier feed threshold (≥88)."""
+    return conviction >= FEED_S_THRESHOLD
+
+
+def is_a_tier(conviction: float) -> bool:
+    """True if conviction reaches the A-tier feed threshold (≥75)."""
+    return conviction >= FEED_A_THRESHOLD
+
+
+if __name__ == "__main__":
+    scorer = ConvictionScorer()
+    demo = [
+        {   # Elite setup — sweep + displacement + full MTF
+            "pair": "BTC", "bias": "SHORT", "engine": "S1", "regime": "TREND_DOWN",
+            "entry": 61000, "sl": 61800, "tp": 58600, "rsi": 68,
+            "volume_ratio": 2.5, "ai_st_direction": "DOWN",
+            "mtf_alignment": "FULL", "structure_quality": 0.85, "fg_score": 22,
+            "sweep_detected": True, "sweep_depth": 0.9, "reclaim_close_ratio": 0.85,
+            "acceptance_bars": 3, "displacement_quality": 0.88, "inefficiency_path": 0.82,
+        },
+        {   # Standard WAIT — decent structure, no sweep confirmation
+            "pair": "SOL", "bias": "LONG", "engine": "S2", "regime": "TREND_UP",
+            "entry": 81.0, "sl": 78.5, "tp": 87.0, "rsi": 40,
+            "volume_ratio": 1.8, "ai_st_direction": "UP",
+            "mtf_alignment": "PARTIAL", "structure_quality": 0.7, "fg_score": 55,
+        },
+        {   # Hard gate: R:R < 2
+            "pair": "XRP", "bias": "LONG", "engine": "S1", "regime": "TREND_UP",
+            "entry": 1.10, "sl": 1.05, "tp": 1.17, "rsi": 45,
+            "volume_ratio": 1.2, "ai_st_direction": "UP",
+            "mtf_alignment": "PARTIAL", "structure_quality": 0.6, "fg_score": 55,
+        },
+    ]
+    for sig in demo:
+        r = scorer.score(sig)
+        print(f"{sig['pair']:5s} {sig['engine']} {sig['bias']:5s} → "
+              f"conviction={r['conviction']:.1f} | {r['action_state']} | {r['action_reason'][:60]}")
+        print(f"       def={r['defensive_score']:.3f} off={r['offensive_score']:.3f} "
+              f"trap={r['trap_risk']:.3f} bonus={r['bonus_multiplier']:.2f}× "
+              f"reasons={r['bonus_reasons']}")
