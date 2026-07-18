@@ -79,7 +79,7 @@ function setTheme(){const root=document.documentElement;let mode=window.matchMed
 
 async function loadLiveBus(){
   if(window.JHL_LIVE_BUS && typeof window.JHL_LIVE_BUS==='object') return window.JHL_LIVE_BUS;
-  const candidates=['/api/signals','./signal_bus.json'];
+  const candidates=['https://tak-scanner-production.up.railway.app/api/signals','/api/signals','./signal_bus.json'];
   for(const url of candidates){
     try{
       const res=await fetch(url,{cache:'no-store'});
@@ -333,7 +333,7 @@ wireTabs();
 async function executeSignal(sig, btn){
   btn.disabled=true; btn.textContent='Sending…';
   try{
-    const r=await fetch('/api/position/execute',{
+    const r=await fetch('https://tak-scanner-production.up.railway.app/api/position/execute',{
       method:'POST',headers:{'Content-Type':'application/json'},
       body:JSON.stringify({pair:sig.pair,bias:sig.bias,engine:sig.engine,fired_at:sig.fired_at})
     });
@@ -348,7 +348,7 @@ async function executeSignal(sig, btn){
 async function rejectSignal(pair, btn){
   btn.disabled=true; btn.textContent='Rejecting…';
   try{
-    const r=await fetch('/api/position/reject',{
+    const r=await fetch('https://tak-scanner-production.up.railway.app/api/position/reject',{
       method:'POST',headers:{'Content-Type':'application/json'},
       body:JSON.stringify({pair})
     });
@@ -363,7 +363,7 @@ async function rejectSignal(pair, btn){
 async function waitSignal(pair, btn){
   btn.disabled=true; btn.textContent='Marking…';
   try{
-    const r=await fetch('/api/position/wait',{
+    const r=await fetch('https://tak-scanner-production.up.railway.app/api/position/wait',{
       method:'POST',headers:{'Content-Type':'application/json'},
       body:JSON.stringify({pair})
     });
@@ -382,7 +382,7 @@ async function waitSignal(pair, btn){
 // ── Kraken bot status poll ──────────────────────────────────────────────────
 async function fetchKrakenStatus(){
   try{
-    const r=await fetch('/api/kraken/status');
+    const r=await fetch('https://tak-scanner-production.up.railway.app/api/kraken/status');
     const d=await r.json();
     if(!d.running) return;
     document.getElementById('krakenMode').textContent = d.dryrun ? 'DRY RUN' : 'LIVE';
