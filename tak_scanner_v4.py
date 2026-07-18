@@ -73,14 +73,22 @@ def build_registry(fg_score: int):
 
     registry = SpecialistRegistry()
     specialists_to_load = [
-        ("S1", "s1_sniper",        "S1Sniper"),
-        ("S2", "s2_trend_rider",   "S2TrendRider"),
-        ("S3", "s3_gimba_volatile","S3GimbaVolatile"),
-        ("S4", "s4_mean_reversion","S4MeanReversion"),
-        ("S5", "s5_ema_cross",     "S5EMACross"),
-        ("S6", "s6_reversal",      "S6Reversal"),
-        ("S7", "s7_range_scalper", "S7RangeScalper"),
-        ("S9", "s9_capitulation",  "S9Capitulation"),
+        # Traditional nine
+        ("S1",      "s1_sniper",        "S1Sniper"),
+        ("S2",      "s2_trend_rider",   "S2TrendRider"),
+        ("S3",      "s3_gimba_volatile","S3GimbaVolatile"),
+        ("S4",      "s4_mean_reversion","S4MeanReversion"),
+        ("S5",      "s5_ema_cross",     "S5EMACross"),
+        ("S6",      "s6_reversal",      "S6Reversal"),
+        ("S7",      "s7_range_scalper", "S7RangeScalper"),
+        ("S9",      "s9_capitulation",  "S9Capitulation"),
+        # RTS Council — retail trap hunters
+        ("RTS_LIQ",    "rts_liq",    "RTSLiq"),
+        ("RTS_BOS",    "rts_bos",    "RTSBos"),
+        ("RTS_CHOCH",  "rts_choch",  "RTSChoch"),
+        ("RTS_ZONE",   "rts_zone",   "RTSZone"),
+        ("RTS_DELTA",  "rts_delta",  "RTSDelta"),
+        ("RTS_BOTTLE", "rts_bottle", "RTSBottle"),
     ]
     for name, mod_name, cls_name in specialists_to_load:
         try:
