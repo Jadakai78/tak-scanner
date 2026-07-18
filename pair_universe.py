@@ -41,7 +41,7 @@ MODULE_DIR = Path(__file__).resolve().parent
 SIGNAL_BUS_PATH = MODULE_DIR / "signal_bus.json"
 
 REQUEST_TIMEOUT = 10  # seconds
-RATE_LIMIT_SLEEP = 0.5  # seconds between OHLC fetches
+RATE_LIMIT_SLEEP = 1.0  # seconds between OHLC fetches — Kraken rate limit safe
 
 # Stablecoins to skip — matched against the base asset of the pair.
 STABLECOINS = {
@@ -129,13 +129,28 @@ class PairUniverse:
             DataFrame with columns [time, open, high, low, close, vwap, volume,
             count] or ``None`` on failure.
         """
+        for _attempt in range(3):
+            try:
+                resp = self.session.get(
+                    OHLC_URL,
+                    params={"pair": pair_key, "interval": interval},
+                    timeout=REQUEST_TIMEOUT,
+                )
+                if resp.status_code == 429:
+                    wait = 2 ** _attempt * 2
+                    logger.warning("OHLC rate-limited %s — retry in %ds", pair_key, wait)
+                    time.sleep(wait)
+                    continue
+                resp.raise_for_status()
+                break
+            except Exception as _exc:
+                if _attempt < 2:
+                    time.sleep(1.5 * (_attempt + 1))
+                    continue
+                logger.warning("fetch_ohlc %s failed after 3 attempts: %s", pair_key, _exc)
+                return None
         try:
-            resp = self.session.get(
-                OHLC_URL,
-                params={"pair": pair_key, "interval": interval},
-                timeout=REQUEST_TIMEOUT,
-            )
-            resp.raise_for_status()
+            resp  # use last response
             payload = resp.json()
             if payload.get("error"):
                 logger.warning("OHLC error for %s: %s", pair_key, payload["error"])
@@ -363,7 +378,8 @@ class PairUniverse:
         # ThreadPoolExecutor caps concurrency so we don't hammer the API;
         # 8 workers ≈ 8x speedup while staying well within Kraken's rate limits.
         ranked: List[Dict[str, Any]] = []
-        MAX_WORKERS = 8
+        # 3 workers — Kraken public API throttles hard at 8 parallel; 3 is safe
+        MAX_WORKERS = 3
         with ThreadPoolExecutor(max_workers=MAX_WORKERS) as pool:
             future_to_cand = {
                 pool.submit(self.analyze_pair, cand, interval): cand
@@ -371,7 +387,7 @@ class PairUniverse:
             }
             for future in as_completed(future_to_cand):
                 try:
-                    metrics = future.result(timeout=15)
+                    metrics = future.result(timeout=30)
                 except Exception as exc:
                     cand = future_to_cand[future]
                     logger.warning("analyze_pair failed for %s: %s", cand.get("altname"), exc)
