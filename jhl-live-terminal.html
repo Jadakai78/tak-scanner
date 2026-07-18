@@ -134,15 +134,21 @@ function signalCard(s){
   const verdict = safeText(s.december_verdict||'PENDING');
   const isExecuted = verdict==='CONFIRM';
   const isRejected = verdict==='REJECT';
+  const isWaiting = verdict==='WAIT';
   const verdictBadge = isExecuted
     ? `<span class="tag" style="color:var(--success);border-color:var(--success)">LIVE</span>`
     : isRejected
     ? `<span class="tag" style="color:var(--danger)">REJECTED</span>`
+    : isWaiting
+    ? `<span class="tag" style="color:#a78bfa;border-color:#a78bfa">WAIT</span>`
     : `<span class="tag" style="color:var(--gold)">PENDING</span>`;
   const execBtns = !isExecuted && !isRejected ? `
     <div style="display:flex;gap:8px;margin-top:10px">
       <button class="btn" style="flex:1;background:color-mix(in srgb,var(--success) 15%,transparent);border-color:var(--success);color:var(--success)"
         onclick="executeSignal(${JSON.stringify(s)},this)">Execute</button>
+      ${!isWaiting ? `<button class="btn" style="flex:1;background:color-mix(in srgb,#a78bfa 12%,transparent);border-color:#a78bfa;color:#a78bfa"
+        onclick="waitSignal('${s.pair}',this)">Wait</button>` : `<button class="btn" style="flex:1;background:color-mix(in srgb,var(--success) 12%,transparent);border-color:var(--success);color:var(--success)"
+        onclick="executeSignal(${JSON.stringify(s)},this)">▶ Go</button>`}
       <button class="btn" style="flex:1;background:color-mix(in srgb,var(--danger) 12%,transparent);border-color:var(--danger);color:var(--danger)"
         onclick="rejectSignal('${s.pair}',this)">Reject</button>
     </div>` : '';
@@ -300,6 +306,25 @@ async function rejectSignal(pair, btn){
     if(d.ok){
       btn.closest('article').style.opacity='0.4';
       btn.textContent='Rejected';
+    } else { btn.textContent='Error'; btn.disabled=false; }
+  }catch(e){ btn.textContent='Error'; btn.disabled=false; }
+}
+
+async function waitSignal(pair, btn){
+  btn.disabled=true; btn.textContent='Marking…';
+  try{
+    const r=await fetch('/api/position/wait',{
+      method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({pair})
+    });
+    const d=await r.json();
+    if(d.ok){
+      btn.textContent='Waiting';
+      btn.style.color='#a78bfa';
+      // swap Wait → Go on the card
+      const card=btn.closest('article');
+      const waitBtn=card.querySelector('button[onclick*="waitSignal"]');
+      if(waitBtn){ waitBtn.textContent='▶ Go'; waitBtn.style.borderColor='var(--success)'; waitBtn.style.color='var(--success)'; }
     } else { btn.textContent='Error'; btn.disabled=false; }
   }catch(e){ btn.textContent='Error'; btn.disabled=false; }
 }
