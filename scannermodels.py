@@ -182,7 +182,7 @@ class CandidateSignal:
     thesis: str
     score: float
 
-    confidence: Optional[float] = 0.0
+    confidence: float = 0.0
     final_status: str = "candidate"
 
     entry_idea: Optional[float] = None
