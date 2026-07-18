@@ -39,7 +39,7 @@
 <div class="brand"><div class="logo" aria-label="JHL logo"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M4 17V7h4v10"/><path d="M10 7v10h6"/><path d="M18 7v10h2"/></svg></div><div class="title"><h1>JHL Live Terminal</h1><p>Canonical operator console · single snapshot consumer · calm trade surface</p></div></div>
 <div class="header-actions"><div class="pill"><span class="dot" id="connDot"></span><span id="connText">loading snapshot</span></div><div class="pill">FG <strong id="fgScore">—</strong> <span class="muted" id="fgLabel">Awaiting feed</span></div><button class="btn" id="themeBtn" aria-label="Toggle theme">Toggle theme</button></div>
 </header>
-<nav class="tabs" aria-label="Terminal tabs"><button class="tab active" data-tab="overview"><small>Tab 01</small><strong>Overview</strong></button><button class="tab" data-tab="kraken"><small>Tab 02</small><strong>Kraken</strong></button><button class="tab" data-tab="props"><small>Tab 03</small><strong>Props</strong></button><button class="tab" data-tab="trade"><small>Tab 04</small><strong>Trade</strong></button><button class="tab" data-tab="diagnostics"><small>Tab 05</small><strong>Diagnostics</strong></button></nav>
+<nav class="tabs" aria-label="Terminal tabs"><button class="tab active" data-tab="overview"><small>Tab 01</small><strong>Overview</strong></button><button class="tab" data-tab="kraken"><small>Tab 02</small><strong>Kraken</strong></button><button class="tab" data-tab="props"><small>Tab 03</small><strong>Props</strong></button><button class="tab" data-tab="trade"><small>Tab 04</small><strong>Trade</strong></button><button class="tab" data-tab="diagnostics"><small>Tab 05</small><strong>Diagnostics</strong></button><button class="tab" data-tab="rts"><small>Tab 06</small><strong>RTS Sniper</strong></button></nav>
 <section class="kpis" id="kpis"></section>
 
 <div class="council" id="councilBanner">
@@ -55,10 +55,11 @@
 </div>
 
 <main>
-<section id="overview" class="tab-panel"><div class="layout"><div class="stack"><div class="card panel"><h2>Live Signals <span class="badge" id="liveCount">0</span></h2><div id="liveSignals" class="stack"></div></div></div><div class="stack"><div class="card panel"><h2>Regime Map <span class="badge" id="regimeCount">0</span></h2><div id="regimeMap" class="mini-list"></div></div><div class="card panel"><h2>Signal Bus Health</h2><div class="muted" id="healthText">Awaiting health sample.</div><div class="healthbar"><span id="healthBar" style="width:0%"></span></div></div></div></div></section>
+<section id="overview" class="tab-panel"><div class="layout"><div class="stack"><div class="card panel"><h2>Live Signals <span class="badge" id="liveCount">0</span></h2><div id="liveSignals" class="stack"></div></div></div><div class="stack"><div class="card panel"><h2>Regime Map <span class="badge" id="regimeCount">0</span></h2><div id="regimeMap" class="mini-list"></div></div><div class="card panel" style="border-color:color-mix(in srgb,var(--primary) 40%,var(--line))"><h2 style="color:var(--primary)">RTS Sniper <span class="badge" id="rtsSideCount">0</span></h2><div id="rtsSidePanel" class="stack"></div></div><div class="card panel"><h2>Signal Bus Health</h2><div class="muted" id="healthText">Awaiting health sample.</div><div class="healthbar"><span id="healthBar" style="width:0%"></span></div></div></div></div></section>
 <section id="kraken" class="tab-panel hidden"><div class="layout"><div class="stack"><div class="card panel"><h2>Bot Status</h2><div id="krakenStatus" class="mini-list"><div class="row"><span class="name">Mode</span><span class="muted" id="krakenMode">—</span></div><div class="row"><span class="name">Seat</span><span class="muted" id="krakenSeat">—</span></div><div class="row"><span class="name">Open Trades</span><span class="muted" id="krakenOpenCount">—</span></div><div class="row"><span class="name">Daily Loss</span><span class="muted" id="krakenDailyLoss">—</span></div><div class="row"><span class="name">Auto Grade</span><span class="muted" id="krakenAutoGrade">—</span></div></div></div><div class="card panel"><h2>Open Trades <span class="badge" id="krakenTradesCount">0</span></h2><div id="krakenTrades" class="stack"></div></div><div class="card panel"><h2>Cycle Log</h2><div id="krakenCycleLog" class="mini-list"></div></div></div><div class="stack"><div class="card panel"><h2>Pair Universe <span class="badge" id="krakenCount">0</span></h2><table class="table" id="krakenTable"><thead><tr><th>Pair</th><th>Prop</th><th>ATR%</th><th>24h Vol</th><th>RSI</th><th>Close</th></tr></thead><tbody></tbody></table></div></div></div></section>
 <section id="props" class="tab-panel hidden"><div class="card panel"><h2>Prop Eligible Universe <span class="badge" id="propsCount">0</span></h2><table class="table" id="propsTable"><thead><tr><th>Pair</th><th>ATR%</th><th>24h Vol</th><th>RSI</th><th>Volume Ratio</th></tr></thead><tbody></tbody></table></div></section>
 <section id="trade" class="tab-panel hidden"><div class="layout"><div class="card panel"><h2>Attack-Ready Board <span class="badge" id="tradeCount">0</span></h2><div id="tradeSignals" class="stack"></div></div><div class="stack"><div class="card panel"><h2>Killed Signals <span class="badge" id="killedCount">0</span></h2><div id="killedSignals" class="mini-list"></div></div><div class="card panel"><h2>Session Summary</h2><div id="sessionSummary" class="mini-list"></div></div></div></div></section>
+<section id="rts" class="tab-panel hidden"><div class="layout"><div class="stack"><div class="card panel" style="border-color:color-mix(in srgb,var(--primary) 40%,var(--line))"><h2 style="color:var(--primary)">RTS Sniper Feed <span class="badge" id="rtsTabCount">0</span></h2><div id="rtsTabPanel" class="stack"></div></div></div><div class="stack"><div class="card panel"><h2>April Field View</h2><div id="rtsAprilView" class="mini-list"><div class="row"><span class="name">Mode</span><span class="muted" id="rtsAprilMode">—</span></div><div class="row"><span class="name">Killed Pairs</span><span class="muted" id="rtsKilledPairs">—</span></div><div class="row"><span class="name">Flip Pairs</span><span class="muted" id="rtsFlipPairs">—</span></div><div class="row"><span class="name">Caution Count</span><span class="muted" id="rtsCautionCount">—</span></div></div></div><div class="card panel"><h2>Trap Leaderboard</h2><div id="rtsTrapBoard" class="mini-list"></div></div></div></div></section>
 <section id="diagnostics" class="tab-panel hidden"><div class="layout"><div class="card panel"><h2>Diagnostics Stream</h2><div id="diagRows" class="mini-list"></div></div><div class="stack"><div class="card panel"><h2>Canonical Schema</h2><pre class="schema" id="schemaBox"></pre></div><div class="card panel"><h2>Integration Notes</h2><div class="mini-list" id="integrationNotes"></div></div></div></div></section>
 </main>
 <p class="footer-note">Live build: worker-fed bus → adapter module → canonical terminal.</p>
@@ -169,6 +170,52 @@ function renderOverview(snapshot){
   document.getElementById('healthBar').style.width=`${Number(snapshot.health?.bus_health_pct || 0)}%`;
 }
 
+function renderRTS(snapshot){
+  const rts = safeArr(snapshot.rts_signals);
+  // Sort by trap_score desc
+  const sorted = [...rts].sort((a,b)=>(_sf(b.trap_score)-_sf(a.trap_score)));
+
+  // Sidebar panel — top 5
+  const sideItems = sorted.slice(0,5);
+  document.getElementById('rtsSideCount').textContent = rts.length;
+  document.getElementById('rtsSidePanel').innerHTML = sideItems.length
+    ? sideItems.map(r => rtsCard(r)).join('')
+    : '<div class="empty">No RTS signals</div>';
+
+  // Tab panel — all
+  document.getElementById('rtsTabCount').textContent = rts.length;
+  document.getElementById('rtsTabPanel').innerHTML = sorted.length
+    ? sorted.map(r => rtsCard(r)).join('')
+    : '<div class="empty">No RTS signals this cycle</div>';
+
+  // Trap leaderboard
+  document.getElementById('rtsTrapBoard').innerHTML = sorted.slice(0,8).map(r=>
+    `<div class="row"><span class="name">${safeText(r.pair)}</span><span class="muted">${safeText(r.engine||r.source||'?')} · trap ${fmtNum(_sf(r.trap_score),2)} · ${safeText(r.intent||'')}</span></div>`
+  ).join('') || '<div class="muted">No trap data</div>';
+
+  // April field view
+  const audit = snapshot.audit || {};
+  const april = audit.april_view || snapshot.april_view || {};
+  const mode = april.council_mode || '—';
+  const modeColors = {STAND_DOWN:'var(--danger)',TIME_TO_HUNT:'var(--gold)',NORMAL:'var(--success)'};
+  const modeEl = document.getElementById('rtsAprilMode');
+  modeEl.textContent = mode;
+  modeEl.style.color = modeColors[mode] || 'var(--muted)';
+  document.getElementById('rtsKilledPairs').textContent = safeArr(april.killed_pairs).join(', ') || 'none';
+  document.getElementById('rtsFlipPairs').textContent  = safeArr(april.flip_pairs).join(', ')   || 'none';
+  document.getElementById('rtsCautionCount').textContent = april.caution_count ?? '—';
+}
+
+function _sf(v){ try{ const f=parseFloat(v); return isNaN(f)?0:f; }catch(e){return 0;} }
+
+function rtsCard(r){
+  const trap = _sf(r.trap_score);
+  const trapColor = trap>=0.75?'var(--danger)':trap>=0.55?'var(--gold)':'var(--success)';
+  const intentTag = r.intent ? `<span class="tag" style="color:var(--primary)">${safeText(r.intent)}</span>` : '';
+  const actionTag = r.action_state ? `<span class="tag">${safeText(r.action_state)}</span>` : '';
+  return `<div class="signal"><div class="signal-top"><div><h3>${safeText(r.pair)}</h3><div class="meta"><span class="tag">${safeText(r.engine||r.source||'RTS')}</span>${intentTag}${actionTag}</div></div><div style="font-weight:700;color:${trapColor}">trap ${fmtNum(trap,2)}</div></div><div class="meta"><span>Conv ${fmtNum(_sf(r.conviction)*100,1)}</span><span>Regime ${safeText(r.regime||'—')}</span>${r.bias?`<span class="tag ${r.bias==='LONG'?'long':'short'}">${r.bias}</span>`:''}</div></div>`;
+}
+
 function renderKraken(){
   const pairs=getKrakenPairs(lastBus);
   document.getElementById('krakenCount').textContent=pairs.length;
@@ -206,6 +253,7 @@ function render(snapshot){
   renderCouncil(snapshot);
   renderOverview(snapshot);
   renderKraken();
+  renderRTS(snapshot);
   renderProps();
   renderTrade(snapshot);
   renderDiagnostics(snapshot);
