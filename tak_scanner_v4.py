@@ -122,24 +122,35 @@ def build_bus_payload(result, fg, regime, pair_rows, scan_started, scan_complete
             sl    = getattr(exe, "stop_idea",  None) if exe else None
             tp    = getattr(exe, "target_idea", None) if exe else None
             rr    = getattr(exe, "rr_estimate", None) if exe else None
-            intent_raw = getattr(exe, "execution_intent", None) if exe else None
+            # V2 scoring fields
+            action_state  = getattr(ps, "action_state",  None) or                             ("CLICK" if getattr(ps, "execution_ready", False) else "WAIT")
+            action_reason = getattr(ps, "action_reason", "")
+            def_score     = getattr(ps, "defensive_score", None)
+            off_score     = getattr(ps, "offensive_score", None)
+            trap          = getattr(ps, "trap_risk", None)
+            bonus         = getattr(ps, "bonus_multiplier", None)
             out.append({
-                "pair":       getattr(ps, "pair",       ""),
-                "bias":       getattr(ps, "side",       "LONG"),
-                "engine":     getattr(ps, "specialist", ""),
-                "setup_type": getattr(ps, "setup_type", ""),
-                "grade":      _score_to_grade(score),
-                "conviction": round(score / 100.0, 3),
-                "score":      round(score, 2),
-                "entry":      entry,
-                "sl":         sl,
-                "tp":         tp,
-                "rr":         rr,
-                "regime":     regime,
-                "intent":     intent_raw or ("EXECUTE" if getattr(ps, "execution_ready", False) else "WATCH"),
-                "prop":       True,
-                "thesis":     getattr(ps, "thesis", ""),
-                "route":      getattr(ps, "route", ""),
+                "pair":            getattr(ps, "pair",       ""),
+                "bias":            getattr(ps, "side",       "LONG"),
+                "engine":          getattr(ps, "specialist", ""),
+                "setup_type":      getattr(ps, "setup_type", ""),
+                # V2 — conviction IS the grade. score_8 is the canonical field.
+                "score_8":         round(score, 1),
+                "conviction":      round(score / 100.0, 3) if score > 1 else round(score, 3),
+                "action_state":    action_state,
+                "action_reason":   action_reason,
+                "defensive_score": round(def_score, 3) if def_score is not None else None,
+                "offensive_score": round(off_score, 3) if off_score is not None else None,
+                "trap_risk":       round(trap, 3) if trap is not None else None,
+                "bonus_multiplier":round(bonus, 2) if bonus is not None else None,
+                "entry":           entry,
+                "sl":              sl,
+                "tp":              tp,
+                "rr":              rr,
+                "regime":          regime,
+                "prop":            True,
+                "thesis":          getattr(ps, "thesis", ""),
+                "route":           getattr(ps, "route", ""),
             })
         return out
 
