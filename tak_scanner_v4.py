@@ -167,6 +167,7 @@ def build_bus_payload(result, fg, regime, pair_rows, scan_started, scan_complete
         "last_scan":      scan_completed,
         "next_scan":      None,
         "f_g":            fg,
+        "fg":             fg,  # duplicate key for adapter compat
         "active_pairs":   len(pair_rows),
         "dead_pairs":     0,
         "pair_universe":  {"count": len(pair_rows), "prop_count": len(prop_pairs)},
@@ -193,6 +194,16 @@ def build_bus_payload(result, fg, regime, pair_rows, scan_started, scan_complete
 def run():
     scan_started = utc_now()
     logger.info("=== TAK Scanner v4 start fg=%s label=%s ===", "?", "?")
+
+    # Heartbeat: stamp last_scan immediately — stale detection works even if scan crashes mid-run
+    try:
+        if SIGNAL_BUS_PATH.exists():
+            _hb = json.loads(SIGNAL_BUS_PATH.read_text())
+            _hb["last_scan"] = scan_started
+            _hb["scanner_heartbeat"] = scan_started
+            SIGNAL_BUS_PATH.write_bytes(json.dumps(_hb, ensure_ascii=False).encode())
+    except Exception as _hb_exc:
+        logger.warning("Heartbeat write failed (non-fatal): %s", _hb_exc)
 
     # 1. Fear & Greed
     fg = get_fear_greed()
