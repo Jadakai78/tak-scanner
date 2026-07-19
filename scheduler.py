@@ -60,22 +60,23 @@ def run_scan():
         logger.error("Scanner not found: %s", SCANNER)
         return
     try:
-            # ── Save any manually-set verdicts before scan overwrites SIGNAL_BUS ──
-            _saved_verdicts = {}
-            try:
-                if SIGNAL_BUS.exists():
-                    _old = json.loads(SIGNAL_BUS.read_text())
-                    for _s in _old.get("signals", []):
-                        _v = _s.get("december_verdict")
-                        if _v and _v not in ("PENDING", "", None):
-                            _saved_verdicts[_s["pair"]] = {
-                                "december_verdict": _v,
-                                "rejected_at": _s.get("rejected_at"),
-                                "wait_at": _s.get("wait_at"),
-                            }
-            except Exception as _ve:
-                logger.warning("Verdict snapshot failed: %s", _ve)
-            logger.info("Running scan: %s", SCANNER.name)
+        # ── Save any manually-set verdicts before scan overwrites SIGNAL_BUS ──
+        _saved_verdicts = {}
+        try:
+            if SIGNAL_BUS.exists():
+                _old = json.loads(SIGNAL_BUS.read_text())
+                for _s in _old.get("signals", []):
+                    _v = _s.get("december_verdict")
+                    if _v and _v not in ("PENDING", "", None):
+                        _saved_verdicts[_s["pair"]] = {
+                            "december_verdict": _v,
+                            "rejected_at": _s.get("rejected_at"),
+                            "wait_at": _s.get("wait_at"),
+                        }
+        except Exception as _ve:
+            logger.warning("Verdict snapshot failed: %s", _ve)
+
+        logger.info("Running scan: %s", SCANNER.name)
         result = subprocess.run(
             [PYTHON, str(SCANNER)],
             cwd=str(MODULE_DIR),
@@ -87,26 +88,28 @@ def run_scan():
             logger.info(result.stdout.strip())
         if result.stderr:
             logger.warning(result.stderr.strip()[:500])
-        # v4 scanner pushes to CF itself, but we also push here as backup
-            # ── Restore manually-set verdicts that the scan overwrote ──
-            try:
-                if _saved_verdicts and SIGNAL_BUS.exists():
-                    _new = json.loads(SIGNAL_BUS.read_text())
-                    for _sig in _new.get("signals", []):
-                        _p = _sig.get("pair")
-                        if _p in _saved_verdicts:
-                            _sig.update(_saved_verdicts[_p])
-                    SIGNAL_BUS.write_bytes(json.dumps(_new, ensure_ascii=False, indent=2).encode())
-                    logger.info("Verdicts restored for: %s", list(_saved_verdicts))
-            except Exception as _re:
-                logger.warning("Verdict restore failed: %s", _re)
-        push_to_cf()
+
+        # ── Restore manually-set verdicts that the scan overwrote ──
+        try:
+            if _saved_verdicts and SIGNAL_BUS.exists():
+                _new = json.loads(SIGNAL_BUS.read_text())
+                for _sig in _new.get("signals", []):
+                    _p = _sig.get("pair")
+                    if _p in _saved_verdicts:
+                        _sig.update(_saved_verdicts[_p])
+                SIGNAL_BUS.write_bytes(json.dumps(_new, ensure_ascii=False, indent=2).encode())
+                logger.info("Verdicts restored for: %s", list(_saved_verdicts))
+        except Exception as _re:
+            logger.warning("Verdict restore failed: %s", _re)
     except KeyboardInterrupt:
         raise
     except subprocess.TimeoutExpired:
         logger.error("Scan timed out after %ds", TIMEOUT)
     except Exception as e:
         logger.error("Scan failed: %s", e)
+    finally:
+        # v4 scanner pushes to CF itself, but we also push here as backup
+        push_to_cf()
 
 
 def run_rts_sniper():
@@ -146,7 +149,23 @@ def run():
         rts_thread = threading.Thread(target=run_rts_sniper, daemon=True, name="rts-sniper")
         rts_thread.start()
         logger.info("RTS Sniper thread launched")
-        # ── Stamp next_scan + worker_push_ok into local bus after each cycle ──         try:             if SIGNAL_BUS.exists():                 _bus = json.loads(SIGNAL_BUS.read_text())                 _next = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S+00:00")                 from datetime import timedelta as _td                 _next_dt = datetime.utcnow() + _td(seconds=INTERVAL_SECONDS)                 _bus["next_scan"] = _next_dt.strftime("%Y-%m-%dT%H:%M:%S+00:00")                 _bus["scanner_heartbeat"] = _next                 _bus["worker_push_ok"] = True                 _bus["bus_write_ok"] = True                 SIGNAL_BUS.write_text(json.dumps(_bus, ensure_ascii=False, indent=2))         except Exception as _se:             logger.warning("Bus stamp failed: %s", _se)         time.sleep(INTERVAL_SECONDS)
+
+        # ── Stamp next_scan + worker_push_ok into local bus after each cycle ──
+        try:
+            if SIGNAL_BUS.exists():
+                _bus = json.loads(SIGNAL_BUS.read_text())
+                _next = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S+00:00")
+                from datetime import timedelta as _td
+                _next_dt = datetime.utcnow() + _td(seconds=INTERVAL_SECONDS)
+                _bus["next_scan"] = _next_dt.strftime("%Y-%m-%dT%H:%M:%S+00:00")
+                _bus["scanner_heartbeat"] = _next
+                _bus["worker_push_ok"] = True
+                _bus["bus_write_ok"] = True
+                SIGNAL_BUS.write_text(json.dumps(_bus, ensure_ascii=False, indent=2))
+        except Exception as _se:
+            logger.warning("Bus stamp failed: %s", _se)
+
+        time.sleep(INTERVAL_SECONDS)
 
 
 if __name__ == "__main__":
