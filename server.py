@@ -97,7 +97,7 @@ def _signal_aging_loop():
             _time.sleep(AGING_INTERVAL)
             _run_signal_aging()
         except Exception as exc:
-            Always write locally("Signal aging error: %s", exc)
+                        _aging_logger.warning("Signal aging error: %s", exc)
 
 def _run_signal_aging():
     """Single aging pass — remove PENDING signals that have gone stale."""
@@ -317,7 +317,7 @@ def _push_verdict_to_kv(bus: dict):
             return resp.status == 200
     except Exception as _e:
                 _aging_logger.warning("KV verdict push failed: %s", _e)
-        # ── Always write locally so verdict survives CF being down ──
+        # ──             _aging_logger.warning so verdict survives CF being down ──
                 try:
                             SIGNAL_BUS.write_text(json.dumps(bus, ensure_ascii=False, indent=2))
                 except Exception:
