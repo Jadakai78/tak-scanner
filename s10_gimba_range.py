@@ -84,7 +84,15 @@ class S10GimbaRange:
         Returns:
             Validated signal dict from build_signal, or None.
         """
-        if regime not in self.REQUIRED_REGIMES:
+        # ── Unpack PairContext when called by orchestrator ─────────────────────
+        _ctx = kwargs.get("context")
+        if _ctx is not None:
+            pair      = getattr(_ctx, "pair", pair)
+            ohlc_df   = getattr(_ctx, "ohlc_df", ohlc_df)
+            regime    = getattr(_ctx, "market_regime", regime) or regime
+            fg_score  = getattr(_ctx, "fg_score", fg_score) or fg_score
+            ai_st     = getattr(_ctx, "ai_state", ai_st)
+                if regime not in self.REQUIRED_REGIMES:
             return None
 
         df = ohlc_df
