@@ -43,6 +43,8 @@ class S3GimbaVolatile:
         regime: str,
         fg_score: int,
         ai_st: Optional[Dict[str, Any]] = None,
+        context=None,
+        shared_state=None,
     ) -> Optional[Dict[str, Any]]:
         """Detect a clean 3-candle momentum push during volatility expansion.
 
@@ -56,7 +58,14 @@ class S3GimbaVolatile:
         Returns:
             Partial signal dict or ``None``.
         """
-        if regime not in self.REQUIRED_REGIMES:
+        # ── Unpack PairContext when called by orchestrator ─────────────────────
+        if context is not None:
+            pair     = getattr(context, "pair", pair)
+            ohlc_df  = getattr(context, "ohlc_df", ohlc_df)
+            regime   = getattr(context, "market_regime", regime) or regime
+            fg_score = getattr(context, "fg_score", fg_score) or fg_score
+            ai_st    = getattr(context, "ai_state", ai_st)
+                if regime not in self.REQUIRED_REGIMES:
             return None
         df = ohlc_df.reset_index(drop=True)
         if len(df) < 30:
