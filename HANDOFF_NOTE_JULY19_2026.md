@@ -239,3 +239,55 @@ If resuming from scratch:
 **Live Terminal**: https://giving-wisdom-production-9b27.up.railway.app  
 **GitHub Repo**: https://github.com/Jadakai78/tak-scanner  
 **Session Date**: July 19, 2026 @ 10:00-11:30 AM CDT
+
+
+---
+
+## Update: Scheduler Fix Merged (PR #1)
+
+**Time**: ~40 minutes after initial handoff
+
+### ✅ Completed
+
+**PR #1**: Fix scheduler.py indentation and control flow
+- **Status**: ✅ Merged successfully  
+- **Deployment**: ✅ ONLINE (both services running)
+  - `attractive-dream`: ✅ Online (scheduler service)
+  - `giving-wisdom`: ✅ Online (web API)
+
+**Changes**:
+1. Dedented verdict-snapshot logic to proper level inside outer try block
+2. Fixed `subprocess.run()` call indentation (line 79 was nested too deeply)  
+3. Moved verdict-restore logic to correct place after subprocess call
+4. Moved `push_to_cf()` into `finally` block so it always runs
+5. Reformatted unreadable inline code at bottom of `run()` into proper multi-line Python
+
+### ❌ Remaining Issues
+
+**NEW**: Syntax errors in `tak_scanner_v4.py`
+- **Root Cause**: Bot reformatting crushed multi-line function definitions onto single lines
+- **File**: `tak_scanner_v4.py`
+- **Line 146**: `def build_bus():` has docstring and code crammed onto one line
+- **Impact**: Scanner logic BROKEN (syntax errors will prevent execution)
+
+**Evidence**:
+```python
+# Line 146 (BROKEN - needs fixing):
+def build_bus():"""Map ScanResult → flat bus shape the CF worker + feed adapter expect."""     rts_map = rts_map or {}     bar_map = bar_map or ...
+```
+
+### 🔧 Next Steps
+
+1. **Fix tak_scanner_v4.py syntax errors**  
+   - Properly format `build_bus()` function definition
+   - Break up mangled single line into proper multi-line Python
+   - Ensure correct indentation for function body
+   
+2. **Test Scanner Execution**
+   - After fix, wait 20 minutes for scheduled scan
+   - Verify `signal_bus.json` updates with fresh timestamp
+   - Check JHL Live Terminal for new signals
+
+3. **Apply Pending Patches** (once scanner is functional)
+   - April Integration Guide
+   - Position Tracking Patch
