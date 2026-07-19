@@ -282,7 +282,7 @@ def build_bus_payload(result, fg, regime, pair_rows, scan_started, scan_complete
     prop_pairs = [r.get("pair", "") for r in pair_rows if r.get("is_prop")]
 
     return {
-        "last_scan": scan_completed or scan_started,  # fallback to start ts so feed never sees null
+        "last_scan":      scan_completed or scan_started,  # fallback to start ts so feed never sees null
         "next_scan":      None,
         "f_g":            fg,
         "fg":             fg,  # duplicate key for adapter compat
