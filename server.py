@@ -170,6 +170,14 @@ BASE = Path(__file__).resolve().parent
 SIGNAL_BUS = Path("/app/data/signal_bus.json")
 # Ensure volume dir exists
 SIGNAL_BUS.parent.mkdir(parents=True, exist_ok=True)
+# Seed from CF KV on cold start if volume is empty
+if not SIGNAL_BUS.exists():
+    try:
+        import urllib.request as _ur
+        with _ur.urlopen(f"https://jhl-signal-bus.blazing0478.workers.dev/api/signals", timeout=8) as _r:
+            SIGNAL_BUS.write_bytes(_r.read())
+    except Exception:
+        pass
 CF_WORKER_URL = "https://jhl-signal-bus.blazing0478.workers.dev"
 
 ACCOUNTS = [
@@ -180,8 +188,21 @@ ACCOUNTS = [
 ]
 
 
+def _seed_from_kv():
+    """On cold start, pull CF KV into local volume so feed isn't empty."""
+    import urllib.request
+    try:
+        with urllib.request.urlopen(f"{CF_WORKER_URL}/api/signals", timeout=8) as resp:
+            data = resp.read()
+            SIGNAL_BUS.write_bytes(data)
+    except Exception:
+        pass
+
+
 def load_signal_bus():
-    """Load bus from local disk — one service, one filesystem, scanner writes here directly."""
+    """Load bus from local disk — fall back to CF KV seed if file missing."""
+    if not SIGNAL_BUS.exists():
+        _seed_from_kv()
     try:
         data = json.loads(SIGNAL_BUS.read_text())
     except (FileNotFoundError, json.JSONDecodeError):
