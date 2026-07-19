@@ -6,23 +6,23 @@ method that returns either None or a standardized signal dict.
 S8 is an overlay / confirmer and is intentionally excluded from ENGINE_CLASSES.
 """
 
-from strategies.s1_sniper import S1Sniper
-from strategies.s2_trend_rider import S2TrendRider
-from strategies.s3_gimba_volatile import S3GimbaVolatile
-from strategies.s4_mean_reversion import S4MeanReversion
-from strategies.s5_ema_cross import S5EMACross
-from strategies.s6_reversal import S6Reversal
-from strategies.s7_range_scalper import S7RangeScalper
-from strategies.s8_mtf_confluence import S8MTFConfluence
-from strategies.s9_capitulation import S9Capitulation
-from strategies.s10_gimba_range import S10GimbaRange
+from s1_sniper import S1Sniper
+from s2_trend_rider import S2TrendRider
+from s3_gimba_volatile import S3GimbaVolatile
+from s4_mean_reversion import S4MeanReversion
+from s5_ema_cross import S5EMACross
+from s6_reversal import S6Reversal
+from s7_range_scalper import S7RangeScalper
+from s8_mtf_confluence import S8MTFConfluence
+from s9_capitulation import S9Capitulation
+from s10_gimba_range import S10GimbaRange
 
-from strategies.rts_liq import RTSLiq
-from strategies.rts_choch import RTSChoch
-from strategies.rts_bos import RTSBos
-from strategies.rts_zone import RTSZone
-from strategies.rts_delta import RTSDelta, score_delta_context
-from strategies.rts_bottle import RTSBottle
+from rts_liq import RTSLiq
+from rts_choch import RTSChoch
+from rts_bos import RTSBos
+from rts_zone import RTSZone
+from rts_delta import RTSDelta, score_delta_context
+from rts_bottle import RTSBottle
 
 ENGINE_CLASSES = {
     "S1": S1Sniper,
