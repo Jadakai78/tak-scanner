@@ -119,7 +119,7 @@ def run():
         rts_thread = threading.Thread(target=run_rts_sniper, daemon=True, name="rts-sniper")
         rts_thread.start()
         logger.info("RTS Sniper thread launched")
-        time.sleep(INTERVAL_SECONDS)
+        # ── Stamp next_scan + worker_push_ok into local bus after each cycle ──         try:             if SIGNAL_BUS.exists():                 _bus = json.loads(SIGNAL_BUS.read_text())                 _next = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S+00:00")                 from datetime import timedelta as _td                 _next_dt = datetime.utcnow() + _td(seconds=INTERVAL_SECONDS)                 _bus["next_scan"] = _next_dt.strftime("%Y-%m-%dT%H:%M:%S+00:00")                 _bus["scanner_heartbeat"] = _next                 _bus["worker_push_ok"] = True                 _bus["bus_write_ok"] = True                 SIGNAL_BUS.write_text(json.dumps(_bus, ensure_ascii=False, indent=2))         except Exception as _se:             logger.warning("Bus stamp failed: %s", _se)         time.sleep(INTERVAL_SECONDS)
 
 
 if __name__ == "__main__":
