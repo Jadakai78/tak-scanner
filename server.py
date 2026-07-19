@@ -319,9 +319,9 @@ def _push_verdict_to_kv(bus: dict):
                 _aging_logger.warning("KV verdict push failed: %s", _e)
         # ── Always write locally so verdict survives CF being down ──
         try:
-            SIGNAL_BUS.write_text(json.dumps(bus, ensure_ascii=False, indent=2))
+                SIGNAL_BUS.write_text(json.dumps(bus, ensure_ascii=False, indent=2))
         except Exception:
-            pass
+                pass
 
 @app.route("/api/position/execute", methods=["POST"])
 def position_execute():
