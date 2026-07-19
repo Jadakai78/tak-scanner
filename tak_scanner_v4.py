@@ -13,6 +13,11 @@ import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
 from alerts import fire_alerts
+try:
+    from oracle_htf import run_oracle, build_market_oracle
+    _ORACLE_ENABLED = True
+except ImportError:
+    _ORACLE_ENABLED = False
 from typing import Any, Dict, List
 
 logging.basicConfig(
@@ -67,6 +72,30 @@ def push_to_cf(payload_bytes: bytes) -> bool:
     except Exception as exc:
         logger.error("CF KV push failed: %s", exc)
     return False
+
+
+def _fetch_ohlcv(pair: str, interval: int, limit: int = 52):
+    """Fetch OHLCV from Kraken REST. interval: 1440=D1, 10080=W1."""
+    import urllib.request, json as _json
+    url = f"https://api.kraken.com/0/public/OHLC?pair={pair}&interval={interval}&since=0"
+    try:
+        with urllib.request.urlopen(url, timeout=10) as r:
+            data = _json.loads(r.read())
+        if data.get("error"):
+            return None
+        result = data.get("result", {})
+        key = [k for k in result if k != "last"]
+        if not key:
+            return None
+        rows = result[key[0]][-limit:]
+        import pandas as pd
+        df = pd.DataFrame(rows, columns=["time","open","high","low","close","vwap","volume","count"])
+        for col in ["open","high","low","close","volume"]:
+            df[col] = df[col].astype(float)
+        return df
+    except Exception as _e:
+        logger.debug("OHLCV fetch %s %s: %s", pair, interval, _e)
+        return None
 
 
 def build_registry(fg_score: int):
@@ -360,6 +389,25 @@ def run():
     logger.info("Contexts built: %d", len(contexts))
 
     # 5. Registry
+    # ── Oracle HTF Analysis ─────────────────────────────────────────────────
+    oracle_map = {}
+    market_oracle = {"market_bias": "NEUTRAL"}
+    if _ORACLE_ENABLED and pair_rows:
+        logger.info("Oracle HTF: analyzing %d pairs on D1/W1", len(pair_rows))
+        _oracle_results = []
+        for _row in pair_rows[:12]:  # cap at 12 pairs to keep scan fast
+            _pair_key = _row.get("pair", "")
+            _kraken_pair = _pair_key.replace("/", "")  # AAVEUSD not AAVE/USD
+            _df_d1 = _fetch_ohlcv(_kraken_pair, 1440, 60)
+            _df_w1 = _fetch_ohlcv(_kraken_pair, 10080, 52)
+            _oracle = run_oracle(_pair_key, None, _df_d1, _df_w1)
+            oracle_map[_pair_key] = _oracle
+            _oracle_results.append(_oracle)
+        market_oracle = build_market_oracle(_oracle_results)
+        logger.info("Market Oracle: bias=%s long=%.0f%% short=%.0f%%",
+                    market_oracle["market_bias"],
+                    market_oracle["long_pct"], market_oracle["short_pct"])
+
     registry = build_registry(fg_score)
     if not registry.names():
         logger.error("No specialists — aborting")
@@ -477,6 +525,14 @@ def run():
     # 7. Build payload
     payload       = build_bus_payload(result, fg, "FEAR", pair_rows,
                                       scan_started, scan_completed, False)
+    # Inject Oracle into bus
+    try:
+        _bus = _json_loads(payload)
+        _bus["oracle"]        = oracle_map
+        _bus["market_oracle"] = market_oracle
+        payload = json.dumps(_bus, ensure_ascii=False, indent=2).encode("utf-8")
+    except Exception as _oe:
+        logger.warning("Oracle bus inject failed: %s", _oe)
     payload_bytes = json.dumps(payload, ensure_ascii=False, indent=2).encode("utf-8")
     SIGNAL_BUS_PATH.write_bytes(payload_bytes)
 
