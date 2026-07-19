@@ -22,7 +22,8 @@ logging.basicConfig(
 logger = logging.getLogger("takscannerv4")
 
 MODULE_DIR = Path(__file__).resolve().parent
-SIGNAL_BUS_PATH = MODULE_DIR / "signal_bus.json"
+SIGNAL_BUS_PATH = Path("/app/data/signal_bus.json")
+Path("/app/data").mkdir(parents=True, exist_ok=True)
 
 CF_ACCOUNT_ID = "ea17be7c9b13c5f9c1fec378a44e9e39"
 CF_KV_NS_ID   = "e93558412bde4922828325e714bc44d8"
