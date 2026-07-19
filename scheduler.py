@@ -75,8 +75,7 @@ def run_scan():
                             }
             except Exception as _ve:
                 logger.warning("Verdict snapshot failed: %s", _ve)
-        logger.info("Running scan: %s", SCANNER.name)
-        result = subprocess.run(
+        logger.info("Running scan: %s", SCANNER.name)        result = subprocess.run(
             [PYTHON, str(SCANNER)],
             cwd=str(MODULE_DIR),
             timeout=TIMEOUT,
