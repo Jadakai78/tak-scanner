@@ -316,7 +316,10 @@ def _push_verdict_to_kv(bus: dict):
         with urllib.request.urlopen(req, timeout=8) as resp:
             return resp.status == 200
     except Exception as _e:
-        _aging_logger.warning("KV verdict push failed: %s", _e)         # ── Always write locally so verdict survives CF being down ──         try:             SIGNAL_BUS.write_text(json.dumps(bus, ensure_ascii=False, indent=2))         except Exception:             pass         # ── Always write locally so verdict survives CF being down ──         try:             SIGNAL_BUS.write_text(json.dumps(bus, ensure_ascii=False, indent=2))         except Exception:             pass
+                _aging_logger.warning("KV verdict push failed: %s", _e)
+        # ── Always write locally so verdict survives CF being down ──
+        try: SIGNAL_BUS.write_text(json.dumps(bus, ensure_ascii=False, indent=2))
+        except Exception: pass
         return False
 
 
@@ -392,6 +395,7 @@ def position_reject():
                 sig["december_verdict"] = "REJECT"
                 sig["rejected_at"] = datetime.now(timezone.utc).isoformat()
         SIGNAL_BUS.write_bytes(json.dumps(bus, ensure_ascii=False, indent=2).encode())
+                _push_verdict_to_kv(bus)
         with _kraken_lock:
             _kraken_open_trades.pop(pair, None)
         return jsonify({"ok": True, "pair": pair, "verdict": "REJECT"})
