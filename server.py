@@ -346,7 +346,7 @@ def position_execute():
                 updated = True
         if updated:
             SIGNAL_BUS.write_bytes(json.dumps(bus, ensure_ascii=False, indent=2).encode())
-            _push_verdict_to_kv(bus)
+        _push_verdict_to_kv(bus)
         # Also log to open trades state
         with _kraken_lock:
             _kraken_open_trades[pair] = {
@@ -395,7 +395,7 @@ def position_reject():
                 sig["december_verdict"] = "REJECT"
                 sig["rejected_at"] = datetime.now(timezone.utc).isoformat()
         SIGNAL_BUS.write_bytes(json.dumps(bus, ensure_ascii=False, indent=2).encode())
-                _push_verdict_to_kv(bus)
+        _push_verdict_to_kv(bus)
         with _kraken_lock:
             _kraken_open_trades.pop(pair, None)
         return jsonify({"ok": True, "pair": pair, "verdict": "REJECT"})
