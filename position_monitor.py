@@ -29,7 +29,7 @@ logger = logging.getLogger("position_monitor")
 POLL_INTERVAL      = 60          # seconds between checks
 FLAT_CANDLES       = 2           # candles with no meaningful move → FLAT kill
 FLAT_THRESHOLD_PCT = 0.0015      # 0.15% move counts as "meaningful"
-SIGNAL_BUS_PATH    = Path(__file__).resolve().parent / "signal_bus.json"
+SIGNAL_BUS_PATH    = Path("/app/data/signal_bus.json")
 KRAKEN_TICKER_URL  = "https://api.kraken.com/0/public/Ticker"
 
 # Track per-pair caution state across cycles
@@ -170,7 +170,7 @@ def _check_position(position: Dict[str, Any], current_price: float,
 
     try:
         import json, pathlib
-        bus_path = pathlib.Path(__file__).resolve().parent / "signal_bus.json"
+        bus_path = Path("/app/data/signal_bus.json")
         if bus_path.exists():
             bus_data = json.loads(bus_path.read_text())
             for sig in bus_data.get("signals", []):
