@@ -463,15 +463,24 @@ def kraken_positions():
 
 @app.route("/api/seed", methods=["POST", "GET"])
 def seed_from_kv():
-    """Force-pull CF KV data into local volume. Call after cold start."""
+    """Seed volume from CF KV or from POST body."""
+    from flask import request as freq
     import urllib.request
+    # If POST with body — write that directly (used by external seeder)
+    if freq.method == "POST" and freq.data:
+        try:
+            bus = json.loads(freq.data)
+            SIGNAL_BUS.write_bytes(json.dumps(bus, ensure_ascii=False, indent=2).encode())
+            return jsonify({"ok": True, "signals_seeded": len(bus.get("signals", []))})
+        except Exception as e:
+            return jsonify({"ok": False, "error": str(e)}), 400
+    # GET — try to pull from CF KV
     try:
         with urllib.request.urlopen(f"{CF_WORKER_URL}/api/signals", timeout=10) as resp:
             data = resp.read()
             SIGNAL_BUS.write_bytes(data)
             bus = json.loads(data)
-            sigs = len(bus.get("signals", []))
-            return jsonify({"ok": True, "signals_seeded": sigs})
+            return jsonify({"ok": True, "signals_seeded": len(bus.get("signals", []))})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
 
