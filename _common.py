@@ -498,4 +498,3 @@ def build_signal(
         signal.update(extra)
 
     return signal
-"""
