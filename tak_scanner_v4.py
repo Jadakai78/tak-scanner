@@ -143,7 +143,7 @@ def _score_to_grade(score: float) -> str:
 
 
 def build_bus_payload(result, fg, regime, pair_rows, scan_started, scan_completed, push_ok, rts_map=None, bar_map=None):
-    def build_bus"""Map ScanResult → flat bus shape the CF worker + feed adapter expect."""     rts_map = rts_map or {}     bar_map = bar_map or {}_payload(result, fg, regime, pair_rows, scan_started, scan_completed, push_ok, rts_map=None, bar_map=None):
+    def build_bus():"""Map ScanResult → flat bus shape the CF worker + feed adapter expect."""     rts_map = rts_map or {}     bar_map = bar_map or {}_payload(result, fg, regime, pair_rows, scan_started, scan_completed, push_ok, rts_map=None, bar_map=None):
 
     def flatten(published_list):
         out = []
