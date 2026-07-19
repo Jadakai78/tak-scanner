@@ -184,5 +184,118 @@ function sigCard(s) {
     <div class="sig-top">
       <div>
         <h3>${safe(s.pair)}</h3>
-        <div class="tags">
-          <span
+          <div class="tags">
+            <span class="tag ${s.bias==='LONG'?'long':'short'}">${safe(s.bias)}</span>
+            <span class="tag gold">Conv ${fmt(conv,1)}</span>
+            <span class="tag">${safe(s.engine)}</span>
+            <span class="tag">${safe(s.regime||'—')}</span>
+            ${verdictTag(v)}
+          </div>
+        </div>
+        <div style="color:var(--muted);font-size:.88rem">R:R ${fmt(s.rr,2)}</div>
+      </div>
+      <div class="levels">
+        <div class="lvl"><div class="k">Entry</div><div class="v">${fmt(s.entry,4)}</div></div>
+        <div class="lvl"><div class="k">Stop</div><div class="v">${fmt(s.sl,4)}</div></div>
+        <div class="lvl"><div class="k">Target</div><div class="v">${fmt(s.tp,4)}</div></div>
+        <div class="lvl"><div class="k">MTF</div><div class="v">${safe(s.mtf_verdict||s.mtf||'—')}</div></div>
+      </div>
+      <div class="tags">
+        <span class="tag">Prop ${s.prop?'Yes':'No'}</span>
+        <span class="tag">${safe(s.intent||'—')}</span>
+        <span class="tag">${safe(s.action_state||'—')}</span>
+      </div>
+      ${btns}
+    </div>`;
+}
+
+function rtsCard(r) {
+  const trap = sf(r.trap_score||r.trap_risk||0);
+  const col = trap>=0.75?'var(--danger)':trap>=0.55?'var(--warning)':'var(--success)';
+  return `<div class="rts-sig">
+    <div class="rts-top">
+      <div>
+        <h3>${safe(r.pair)}</h3>
+        <div class="tags" style="margin-top:6px">
+          <span class="tag">${safe(r.engine||r.source||'RTS')}</span>
+          ${r.intent?`<span class="tag" style="color:var(--primary)">${safe(r.intent)}</span>`:''}
+          ${r.bias?`<span class="tag ${r.bias==='LONG'?'long':'short'}">${r.bias}</span>`:''}
+          ${r.action_state?`<span class="tag">${safe(r.action_state)}</span>`:''}
+        </div>
+      </div>
+      <div class="trap-score" style="color:${col}">trap ${fmt(trap,2)}</div>
+    </div>
+    <div class="tags">
+      <span class="tag">Conv ${fmt(sf(r.conviction)*100,1)}</span>
+      <span class="tag">Regime ${safe(r.regime||'—')}</span>
+    </div>
+  </div>`;
+}
+
+function gimbaCard(r) {
+  const conv = sf(r.conviction)>1?sf(r.conviction):sf(r.conviction)*100;
+  return `<div class="gimba-sig">
+    <div class="rts-top">
+      <div>
+        <h3>${safe(r.pair||r.symbol||'GIMBA')}</h3>
+        <div class="tags" style="margin-top:6px">
+          <span class="tag">${safe(r.engine||r.source||'GIMBA')}</span>
+          ${r.bias?`<span class="tag ${r.bias==='LONG'?'long':'short'}">${r.bias}</span>`:''}
+          ${r.intent?`<span class="tag" style="color:var(--primary)">${safe(r.intent)}</span>`:''}
+        </div>
+      </div>
+      <div style="font-size:.85rem;color:var(--muted)">Conv ${fmt(conv,1)}</div>
+    </div>
+    <div class="tags" style="margin-top:8px">
+      <span class="tag">Regime ${safe(r.regime||'—')}</span>
+      <span class="tag">Action ${safe(r.action_state||'—')}</span>
+    </div>
+  </div>`;
+}
+
+function empty(msg){return `<div class="empty">${msg}</div>`;}
+
+async function loadBus(){
+  for(const url of ['/api/signals','./signal_bus.json']){
+    try{const r=await fetch(url,{cache:'no-store'});if(r.ok){const d=await r.json();if(d&&typeof d==='object')return d;}}catch(_){}
+  }
+  return {};
+}
+
+async function refresh(){
+  const bus = await loadBus();
+  const snap = createCanonicalSnapshot(bus,{version:'v1',source:'adapter',environment:bus.environment||'live'});
+  const status = snap.health?.status||(snap.signals?'live':'offline');
+  setConn(status);
+  document.getElementById('statScan').textContent=(snap.session?.last_scan||'—').slice(11,19)||'—';
+  document.getElementById('fgScore').textContent=safe(snap.health?.fear_greed?.score);
+  document.getElementById('fgLabel').textContent=safe(snap.health?.fear_greed?.label||'');
+  const sigs=arr(snap.signals).filter(s=>s.december_verdict!=='EXPIRED');
+  document.getElementById('statSigs').textContent=sigs.length;
+  document.getElementById('botsCount').textContent=sigs.length;
+  document.getElementById('botsBody').innerHTML=sigs.length?sigs.map(sigCard).join(''):empty('No bot signals this cycle.');
+  const rts=arr(snap.rts_signals).sort((a,b)=>sf(b.trap_score||b.trap_risk||0)-sf(a.trap_score||a.trap_risk||0));
+  document.getElementById('statRts').textContent=rts.length;
+  document.getElementById('rtsCount').textContent=rts.length;
+  document.getElementById('rtsBody').innerHTML=rts.length?rts.map(rtsCard).join(''):empty('No RTS trap signals this cycle.');
+  const gimba=arr(snap.gimba_signals||bus.gimba_signals||[]);
+  document.getElementById('gimbaCount').textContent=gimba.length;
+  document.getElementById('gimbaBody').innerHTML=gimba.length?gimba.map(gimbaCard).join(''):empty('No GIMBA signals this cycle.');
+  const april=snap.audit?.april_view||snap.april_view||bus.april_view||{};
+  const mode=april.council_mode||snap.session?.council_mode||'—';
+  const mEl=document.getElementById('statMode');
+  mEl.textContent=mode;
+  mEl.style.color=mode==='STAND_DOWN'?'var(--danger)':mode==='TIME_TO_HUNT'?'var(--gold)':mode==='NORMAL'?'var(--success)':'var(--muted)';
+}
+
+window._exec=async(sig,btn)=>{btn.disabled=true;btn.textContent='Sending…';try{const r=await fetch('/api/position/execute',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({pair:sig.pair,bias:sig.bias,engine:sig.engine,fired_at:sig.fired_at})});const d=await r.json();if(d.ok){btn.textContent='✓ LIVE';btn.style.background='color-mix(in srgb,var(--success) 25%,transparent)';}else{btn.textContent='Error';btn.disabled=false;}}catch(_){btn.textContent='Error';btn.disabled=false;}};
+window._wait=async(pair,btn)=>{btn.disabled=true;btn.textContent='Marking…';try{const r=await fetch('/api/position/wait',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({pair})});const d=await r.json();if(d.ok){btn.textContent='Waiting';btn.style.color='#a78bfa';}else{btn.textContent='Error';btn.disabled=false;}}catch(_){btn.textContent='Error';btn.disabled=false;}};
+window._rej=async(pair,btn)=>{btn.disabled=true;btn.textContent='Rejecting…';try{const r=await fetch('/api/position/reject',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({pair})});const d=await r.json();if(d.ok){btn.closest('.sig').style.opacity='0.4';btn.textContent='Rejected';}else{btn.textContent='Error';btn.disabled=false;}}catch(_){btn.textContent='Error';btn.disabled=false;}};
+
+window.toggleSection=(id)=>{document.getElementById(id+'Body').classList.toggle('hidden');document.getElementById(id+'Chev').classList.toggle('open');};
+
+refresh();
+setInterval(refresh,15000);
+</script>
+</body>
+</html>
