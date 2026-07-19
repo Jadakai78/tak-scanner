@@ -623,7 +623,7 @@ class TakScannerV3:
         logger.info("BUS WRITE OK | signals=%s killed=%s", len(signals), len(killed))
 
         try:
-            worker_url = "https://jhl-signal-bus.blazing0478.workers.dev/update"
+            worker_url = "https://giving-wisdom-production-9b27.up.railway.app/update"
             bus_path = Path("/app/signal_bus.json")
             payload = bus_path.read_text(encoding="utf-8")
 
