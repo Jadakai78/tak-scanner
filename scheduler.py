@@ -24,7 +24,9 @@ CF_KV_URL     = (
     f"https://api.cloudflare.com/client/v4/accounts/{CF_ACCOUNT_ID}"
     f"/storage/kv/namespaces/{CF_KV_NS_ID}/values/signal_bus"
 )
-SIGNAL_BUS = MODULE_DIR / "signal_bus.json"
+SIGNAL_BUS = Path("/app/data/signal_bus.json")
+# Ensure volume dir exists
+SIGNAL_BUS.parent.mkdir(parents=True, exist_ok=True)
 
 
 
