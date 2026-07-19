@@ -103,6 +103,7 @@ function setConnectionState(status){
   dot.className='dot';
   if(status==='live') dot.classList.add('live');
   else if(status==='stale') dot.classList.add('stale');
+  else if(s==='live'||s==='stale') dot.classList.add('stale');
   else dot.classList.add('offline');
 }
 
@@ -119,8 +120,9 @@ function renderKpis(snapshot){
   document.getElementById('kpis').innerHTML=kpis.map(([label,value])=>`<div class="card kpi"><div class="label">${label}</div><div class="value">${value}</div><div class="sub">canonical field</div></div>`).join('');
   document.getElementById('fgScore').textContent=safeText(snapshot.health?.fear_greed?.score);
   document.getElementById('fgLabel').textContent=safeText(snapshot.health?.fear_greed?.label);
-  document.getElementById('connText').textContent=`${safeText(snapshot.health?.status)} snapshot`;
-  setConnectionState(snapshot.health?.status);
+  const healthStatus = snapshot.health?.status || (snapshot.signals !== undefined ? 'live' : 'offline');
+  document.getElementById('connText').textContent=`${healthStatus} snapshot`;
+  setConnectionState(healthStatus);
 }
 
 function rtsInlineBlock(s){
