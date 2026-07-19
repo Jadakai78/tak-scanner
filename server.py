@@ -167,7 +167,9 @@ _aging_thread = threading.Thread(target=_signal_aging_loop, daemon=True, name="s
 _aging_thread.start()
 
 BASE = Path(__file__).resolve().parent
-SIGNAL_BUS = BASE / "signal_bus.json"
+SIGNAL_BUS = Path("/app/data/signal_bus.json")
+# Ensure volume dir exists
+SIGNAL_BUS.parent.mkdir(parents=True, exist_ok=True)
 CF_WORKER_URL = "https://jhl-signal-bus.blazing0478.workers.dev"
 
 ACCOUNTS = [
