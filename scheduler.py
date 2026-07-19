@@ -60,6 +60,21 @@ def run_scan():
         logger.error("Scanner not found: %s", SCANNER)
         return
     try:
+            # ── Save any manually-set verdicts before scan overwrites SIGNAL_BUS ──
+            _saved_verdicts = {}
+            try:
+                if SIGNAL_BUS.exists():
+                    _old = json.loads(SIGNAL_BUS.read_text())
+                    for _s in _old.get("signals", []):
+                        _v = _s.get("december_verdict")
+                        if _v and _v not in ("PENDING", "", None):
+                            _saved_verdicts[_s["pair"]] = {
+                                "december_verdict": _v,
+                                "rejected_at": _s.get("rejected_at"),
+                                "wait_at": _s.get("wait_at"),
+                            }
+            except Exception as _ve:
+                logger.warning("Verdict snapshot failed: %s", _ve)
         logger.info("Running scan: %s", SCANNER.name)
         result = subprocess.run(
             [PYTHON, str(SCANNER)],
@@ -73,6 +88,18 @@ def run_scan():
         if result.stderr:
             logger.warning(result.stderr.strip()[:500])
         # v4 scanner pushes to CF itself, but we also push here as backup
+            # ── Restore manually-set verdicts that the scan overwrote ──
+            try:
+                if _saved_verdicts and SIGNAL_BUS.exists():
+                    _new = json.loads(SIGNAL_BUS.read_text())
+                    for _sig in _new.get("signals", []):
+                        _p = _sig.get("pair")
+                        if _p in _saved_verdicts:
+                            _sig.update(_saved_verdicts[_p])
+                    SIGNAL_BUS.write_bytes(json.dumps(_new, ensure_ascii=False, indent=2).encode())
+                    logger.info("Verdicts restored for: %s", list(_saved_verdicts))
+            except Exception as _re:
+                logger.warning("Verdict restore failed: %s", _re)
         push_to_cf()
     except KeyboardInterrupt:
         raise
