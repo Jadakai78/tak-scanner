@@ -174,11 +174,11 @@ SIGNAL_BUS.parent.mkdir(parents=True, exist_ok=True)
 if not SIGNAL_BUS.exists():
     try:
         import urllib.request as _ur
-        with _ur.urlopen(f"https://jhl-signal-bus.blazing0478.workers.dev/api/signals", timeout=8) as _r:
+        with _ur.urlopen(f"https://giving-wisdom-production-9b27.up.railway.app/api/signals", timeout=8) as _r:
             SIGNAL_BUS.write_bytes(_r.read())
     except Exception:
         pass
-CF_WORKER_URL = "https://jhl-signal-bus.blazing0478.workers.dev"
+CF_WORKER_URL = "https://giving-wisdom-production-9b27.up.railway.app"
 
 ACCOUNTS = [
     {"account_id": "eval_4_25k",    "name": "Eval 4 $25K DRAGON",  "recommended_risk_per_trade": 177.0},
