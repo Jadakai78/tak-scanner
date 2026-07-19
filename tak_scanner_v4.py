@@ -142,8 +142,8 @@ def _score_to_grade(score: float) -> str:
     return "C"
 
 
-def build_bus_payload(result, fg, regime, pair_rows, scan_started, scan_completed, push_ok):
-    """Map ScanResult → flat bus shape the CF worker + feed adapter expect."""
+def build_bus_payload(result, fg, regime, pair_rows, scan_started, scan_completed, push_ok, rts_map=None, bar_map=None):
+    def build_bus"""Map ScanResult → flat bus shape the CF worker + feed adapter expect."""     rts_map = rts_map or {}     bar_map = bar_map or {}_payload(result, fg, regime, pair_rows, scan_started, scan_completed, push_ok, rts_map=None, bar_map=None):
 
     def flatten(published_list):
         out = []
@@ -525,11 +525,11 @@ def run():
     # 7. Build payload
     payload       = build_bus_payload(result, fg, "FEAR", pair_rows,
                                       scan_started, scan_completed, False)
-    # Inject Oracle into bus
+    # Inject Oracle + April into bus
     try:
         _bus = _json_loads(payload)
         _bus["oracle"]        = oracle_map
-        _bus["market_oracle"] = market_oracle
+        _bus["market_oracle"] = market_oracle         # ── April council view — hoist from audit to top-level bus ──────────────         try:             _april = result.audit.get("april_view") or {}         except Exception:             _april = {}         _bus["april_view"]   = _april         _bus["council_mode"] = _april.get("council_mode", "NORMAL")         _bus["april_reason"] = _april.get("reason", "")
         payload = json.dumps(_bus, ensure_ascii=False, indent=2).encode("utf-8")
     except Exception as _oe:
         logger.warning("Oracle bus inject failed: %s", _oe)
