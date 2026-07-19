@@ -152,7 +152,7 @@ class TakScannerV4:
                 engine_class = REGIME_ENGINES.get(regime, ENGINE_CLASSES[0])
                 engine = engine_class()
                 
-                candidate = engine.evaluate(pair, aist)
+                candidate = engine.generate(pairfg, , aist)
                 if candidate:
                     # Enrich with microstructure
                     enriched = microenrich(candidate)
