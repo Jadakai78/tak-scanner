@@ -8,7 +8,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(
 logger = logging.getLogger("scheduler")
 
 MODULE_DIR     = Path(__file__).resolve().parent
-SCANNER        = MODULE_DIR / "tak_scanner_v4.py"   # v4 — was v3
+SCANNER        = MODULE_DIR / "tak_scanner_v3.py"   # v4 — was v3
 RTS_SNIPER     = MODULE_DIR / "rts_sniper.py"
 RTS_INTERVAL   = 10 * 60
 RTS_TIMEOUT    = 300
