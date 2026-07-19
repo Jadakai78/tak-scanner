@@ -152,8 +152,13 @@ class TakScannerV4:
                 engine_class = REGIME_ENGINES.get(regime, ENGINE_CLASSES[0])
                 engine = engine_class()
                 
-                candidate = engine.generate(pair, fg, aist)
-                                if candidate:
+                # Fetch OHLC data for specialist strategies
+                ohlc_df = self.universe.fetch_ohlc(pair, interval=60)  # 1h candles
+                if ohlc_df is None or len(ohlc_df) < 50:
+                    logger.warning(f"Insufficient OHLC data for {pair}, skipping")
+                    continue
+                
+                candidate = engine.generate(pair, ohlc_df, regime, fg, aist)                                if candidate:
                     # Enrich with microstructure
                     enriched = microenrich(candidate)
                     
