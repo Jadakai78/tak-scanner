@@ -1,15 +1,16 @@
-"""_common.py — Shared technical-analysis helpers for the S1-S9 engines.
+"""_common.py — Shared technical-analysis helpers for S1-S9 engines + canonical context builders.
 
-Nine strategy engines share the same primitives (EMA, RSI, ATR, Bollinger
-Bands, swing detection, SuperTrend, Hull MA, FVG detection, candle anatomy).
-Centralizing them here keeps each engine short and guarantees every engine
-computes indicators identically.
+Nine strategy engines share the same primitives (EMA ribbons 25/50/100/200, RSI, ATR, Bollinger,
+swing detection, SuperTrend, Hull MA, FVG, candle anatomy, volume, MACD, OBV).
+Centralizing them here keeps each engine short and guarantees every engine computes indicators identically.
+
+NEW: Dynamic SL/TP system (replaces hard 2R) + canonical context objects for trend/ST/volume/volatility/structure.
+These context objects flow directly into the canonical signal bus schema (meta/session/health/regimes/signals/alerts/diagnostics).
 
 Every engine's ``generate(...)`` returns a *partial* signal dict (or ``None``).
-The scanner later augments it with AI-SuperTrend + MTF fields before scoring.
-Use :func:`build_signal` to assemble a well-formed, 2R-gated signal.
+The scanner augments it with AI-SuperTrend + MTF fields before scoring.
+Use :func:`build_signal` to assemble a well-formed, validated signal with dynamic R:R.
 """
-
 from __future__ import annotations
 
 import logging
@@ -20,331 +21,425 @@ import pandas as pd
 
 logger = logging.getLogger("strategies.common")
 
-MIN_RR = 2.0  # Global 2R hard gate (Rule / prop requirement).
-
+# ---------------------------------------------------------------------------
+# Config & Constants
+# ---------------------------------------------------------------------------
+MIN_RR = 1.5  # Minimum R:R floor (down from hard 2.0 to allow dynamic flexibility)
+DEFAULT_TP_MULT = 2.5  # Default TP multiplier for dynamic system
+RIBBON_PERIODS = [25, 50, 100, 200]  # EMA ribbon periods (common indicators)
+MACD_FAST = 12
+MACD_SLOW = 26
+MACD_SIGNAL = 9
 
 # ---------------------------------------------------------------------------
 # Moving averages / oscillators
 # ---------------------------------------------------------------------------
 def ema(series: pd.Series, period: int) -> pd.Series:
-    """Exponential moving average.
-
-    Args:
-        series: Price series.
-        period: EMA span.
-
-    Returns:
-        EMA series aligned to the input.
-    """
+    """Exponential moving average."""
     return series.ewm(span=period, adjust=False).mean()
 
 
-def rsi(close: pd.Series, period: int = 14) -> pd.Series:
-    """Relative Strength Index (Wilder smoothing).
-
-    Args:
-        close: Close-price series.
-        period: RSI lookback.
-
-    Returns:
-        RSI series (0-100); NaN-safe (fills neutral 50).
+def ema_ribbon(df: pd.DataFrame, price_col: str = "close") -> Dict[str, pd.Series]:
     """
-    delta = close.diff()
-    gain = delta.clip(lower=0)
-    loss = -delta.clip(upper=0)
-    avg_gain = gain.ewm(alpha=1 / period, adjust=False).mean()
-    avg_loss = loss.ewm(alpha=1 / period, adjust=False).mean()
-    rs = avg_gain / avg_loss.replace(0, np.nan)
-    out = 100 - (100 / (1 + rs))
-    return out.fillna(50.0)
+    EMA ribbon: 25, 50, 100, 200.
+    Returns dict with keys: "ema_25", "ema_50", "ema_100", "ema_200".
+    """
+    ribbon = {}
+    for period in RIBBON_PERIODS:
+        ribbon[f"ema_{period}"] = ema(df[price_col], period)
+    return ribbon
 
 
+def rsi(series: pd.Series, period: int = 14) -> pd.Series:
+    """Relative Strength Index."""
+    delta = series.diff()
+    gain = delta.where(delta > 0, 0.0)
+    loss = -delta.where(delta < 0, 0.0)
+    avg_gain = gain.ewm(span=period, adjust=False).mean()
+    avg_loss = loss.ewm(span=period, adjust=False).mean()
+    rs = avg_gain / (avg_loss + 1e-12)
+    return 100.0 - (100.0 / (1.0 + rs))
+
+
+def macd(series: pd.Series, fast: int = MACD_FAST, slow: int = MACD_SLOW, signal: int = MACD_SIGNAL) -> Tuple[pd.Series, pd.Series, pd.Series]:
+    """
+    MACD (Moving Average Convergence Divergence).
+    Returns: (macd_line, signal_line, histogram)
+    """
+    ema_fast = ema(series, fast)
+    ema_slow = ema(series, slow)
+    macd_line = ema_fast - ema_slow
+    signal_line = ema(macd_line, signal)
+    histogram = macd_line - signal_line
+    return macd_line, signal_line, histogram
+
+
+def obv(df: pd.DataFrame) -> pd.Series:
+    """
+    On-Balance Volume (OBV).
+    Expects df to have 'close' and 'volume' columns.
+    """
+    obv_series = pd.Series(index=df.index, dtype=float)
+    obv_series.iloc[0] = df["volume"].iloc[0]
+    for i in range(1, len(df)):
+        if df["close"].iloc[i] > df["close"].iloc[i - 1]:
+            obv_series.iloc[i] = obv_series.iloc[i - 1] + df["volume"].iloc[i]
+        elif df["close"].iloc[i] < df["close"].iloc[i - 1]:
+            obv_series.iloc[i] = obv_series.iloc[i - 1] - df["volume"].iloc[i]
+        else:
+            obv_series.iloc[i] = obv_series.iloc[i - 1]
+    return obv_series
+
+
+# ---------------------------------------------------------------------------
+# Volatility & Bands
+# ---------------------------------------------------------------------------
 def atr_series(df: pd.DataFrame, period: int = 14) -> pd.Series:
-    """Average True Range (Wilder) as a full series.
-
-    Args:
-        df: OHLC DataFrame (needs high/low/close).
-        period: ATR lookback.
-
-    Returns:
-        ATR series aligned to df rows.
-    """
-    high = df["high"].to_numpy(dtype=float)
-    low = df["low"].to_numpy(dtype=float)
-    close = df["close"].to_numpy(dtype=float)
-    prev_close = np.roll(close, 1)
-    tr = np.maximum.reduce([
-        high - low,
-        np.abs(high - prev_close),
-        np.abs(low - prev_close),
-    ])
-    tr[0] = high[0] - low[0]
-    return pd.Series(tr, index=df.index).ewm(alpha=1 / period, adjust=False).mean()
+    """Average True Range (full series)."""
+    h_l = df["high"] - df["low"]
+    h_cp = (df["high"] - df["close"].shift(1)).abs()
+    l_cp = (df["low"] - df["close"].shift(1)).abs()
+    tr = pd.concat([h_l, h_cp, l_cp], axis=1).max(axis=1)
+    return tr.ewm(span=period, adjust=False).mean()
 
 
 def atr(df: pd.DataFrame, period: int = 14) -> float:
-    """Latest ATR value.
+    """Current ATR (scalar)."""
+    atr_s = atr_series(df, period)
+    return atr_s.iloc[-1] if not atr_s.empty else 0.0
 
-    Args:
-        df: OHLC DataFrame.
-        period: ATR lookback.
 
-    Returns:
-        Latest ATR float (0.0 if insufficient data).
+def bollinger(series: pd.Series, period: int = 20, std_dev: float = 2.0) -> Tuple[pd.Series, pd.Series, pd.Series]:
     """
-    if len(df) < period + 1:
-        return 0.0
-    return float(atr_series(df, period).iloc[-1])
-
-
-def bollinger(
-    close: pd.Series, period: int = 20, num_std: float = 2.0
-) -> Tuple[pd.Series, pd.Series, pd.Series]:
-    """Bollinger Bands.
-
-    Args:
-        close: Close-price series.
-        period: SMA/STD lookback.
-        num_std: Standard-deviation multiplier.
-
-    Returns:
-        ``(upper, middle, lower)`` band series.
+    Bollinger Bands.
+    Returns: (upper, middle, lower)
     """
-    mid = close.rolling(period).mean()
-    std = close.rolling(period).std()
-    upper = mid + num_std * std
-    lower = mid - num_std * std
-    return upper, mid, lower
+    middle = series.rolling(window=period).mean()
+    std = series.rolling(window=period).std()
+    upper = middle + (std * std_dev)
+    lower = middle - (std * std_dev)
+    return upper, middle, lower
 
 
-def hull_ma(close: pd.Series, period: int = 20) -> pd.Series:
-    """Hull Moving Average (smoother, lower-lag MA).
-
-    Args:
-        close: Close-price series.
-        period: HMA period.
-
-    Returns:
-        Hull MA series.
-    """
-    half = max(int(period / 2), 1)
-    sqrt_p = max(int(np.sqrt(period)), 1)
-    wma_half = _wma(close, half)
-    wma_full = _wma(close, period)
-    return _wma(2 * wma_half - wma_full, sqrt_p)
+# ---------------------------------------------------------------------------
+# Trend Indicators
+# ---------------------------------------------------------------------------
+def hull_ma(series: pd.Series, period: int = 9) -> pd.Series:
+    """Hull Moving Average (lag-reduced)."""
+    half_length = max(int(period / 2), 1)
+    sqrt_length = max(int(np.sqrt(period)), 1)
+    wma_half = _wma(series, half_length)
+    wma_full = _wma(series, period)
+    raw = 2 * wma_half - wma_full
+    return _wma(raw, sqrt_length)
 
 
 def _wma(series: pd.Series, period: int) -> pd.Series:
-    """Weighted moving average (linear weights)."""
-    weights = np.arange(1, period + 1, dtype=float)
-    return series.rolling(period).apply(
-        lambda x: np.dot(x, weights) / weights.sum(), raw=True
-    )
+    """Weighted Moving Average."""
+    weights = np.arange(1, period + 1)
+    return series.rolling(window=period).apply(lambda x: np.dot(x, weights) / weights.sum(), raw=True)
 
 
-# ---------------------------------------------------------------------------
-# Structure / swings
-# ---------------------------------------------------------------------------
-def swing_highs(df: pd.DataFrame, left: int = 2, right: int = 2) -> List[int]:
-    """Indices of pivot swing highs (fractal-style).
-
-    A bar is a swing high if its high is >= the ``left`` bars before and
-    ``right`` bars after it.
-
-    Args:
-        df: OHLC DataFrame.
-        left: Bars required to the left.
-        right: Bars required to the right.
-
-    Returns:
-        List of integer positional indices of swing highs.
+def supertrend(df: pd.DataFrame, period: int = 10, multiplier: float = 3.0) -> Tuple[pd.Series, pd.Series]:
     """
-    highs = df["high"].to_numpy(dtype=float)
-    idxs: List[int] = []
-    for i in range(left, len(highs) - right):
-        window = highs[i - left : i + right + 1]
-        if highs[i] == window.max() and np.argmax(window) == left:
-            idxs.append(i)
-    return idxs
-
-
-def swing_lows(df: pd.DataFrame, left: int = 2, right: int = 2) -> List[int]:
-    """Indices of pivot swing lows (fractal-style).
-
-    Args:
-        df: OHLC DataFrame.
-        left: Bars required to the left.
-        right: Bars required to the right.
-
-    Returns:
-        List of integer positional indices of swing lows.
+    SuperTrend indicator.
+    Returns: (supertrend_series, direction_series)
+      direction: 1 = uptrend, -1 = downtrend
     """
-    lows = df["low"].to_numpy(dtype=float)
-    idxs: List[int] = []
-    for i in range(left, len(lows) - right):
-        window = lows[i - left : i + right + 1]
-        if lows[i] == window.min() and np.argmin(window) == left:
-            idxs.append(i)
-    return idxs
-
-
-def supertrend(df: pd.DataFrame, period: int = 10, multiplier: float = 3.0) -> pd.Series:
-    """Classic SuperTrend direction series (+1 up, -1 down).
-
-    Args:
-        df: OHLC DataFrame.
-        period: ATR period.
-        multiplier: ATR band multiplier.
-
-    Returns:
-        Series of +1/-1 direction values aligned to df rows.
-    """
-    hl2 = (df["high"] + df["low"]) / 2.0
+    hl_avg = (df["high"] + df["low"]) / 2
     atr_val = atr_series(df, period)
-    upper = hl2 + multiplier * atr_val
-    lower = hl2 - multiplier * atr_val
-    close = df["close"].to_numpy(dtype=float)
+    upper_band = hl_avg + (multiplier * atr_val)
+    lower_band = hl_avg - (multiplier * atr_val)
 
-    direction = np.ones(len(df), dtype=int)
-    up = upper.to_numpy().copy()
-    lo = lower.to_numpy().copy()
+    st = pd.Series(index=df.index, dtype=float)
+    direction = pd.Series(index=df.index, dtype=int)
+
+    st.iloc[0] = lower_band.iloc[0]
+    direction.iloc[0] = 1
+
     for i in range(1, len(df)):
-        if close[i] > up[i - 1]:
-            direction[i] = 1
-        elif close[i] < lo[i - 1]:
-            direction[i] = -1
+        if df["close"].iloc[i] > st.iloc[i - 1]:
+            st.iloc[i] = lower_band.iloc[i]
+            direction.iloc[i] = 1
+        elif df["close"].iloc[i] < st.iloc[i - 1]:
+            st.iloc[i] = upper_band.iloc[i]
+            direction.iloc[i] = -1
         else:
-            direction[i] = direction[i - 1]
-            # Tighten bands in the prevailing direction.
-            if direction[i] == 1 and lo[i] < lo[i - 1]:
-                lo[i] = lo[i - 1]
-            if direction[i] == -1 and up[i] > up[i - 1]:
-                up[i] = up[i - 1]
-    return pd.Series(direction, index=df.index)
+            st.iloc[i] = st.iloc[i - 1]
+            direction.iloc[i] = direction.iloc[i - 1]
+
+    return st, direction
 
 
 # ---------------------------------------------------------------------------
-# SMC helpers
+# Structure Detection
 # ---------------------------------------------------------------------------
-def detect_fvg(df: pd.DataFrame, lookback: int = 10) -> Optional[Dict[str, Any]]:
-    """Detect the most recent Fair Value Gap in the last ``lookback`` candles.
+def swing_highs(df: pd.DataFrame, left: int = 5, right: int = 5) -> List[int]:
+    """Swing high pivot indices."""
+    highs = []
+    for i in range(left, len(df) - right):
+        if all(df["high"].iloc[i] >= df["high"].iloc[i - j] for j in range(1, left + 1)) and \
+           all(df["high"].iloc[i] >= df["high"].iloc[i + j] for j in range(1, right + 1)):
+            highs.append(i)
+    return highs
 
-    A bullish FVG exists when candle[i-1].high < candle[i+1].low (a 3-candle
-    gap up); bearish when candle[i-1].low > candle[i+1].high.
 
-    Args:
-        df: OHLC DataFrame.
-        lookback: How many recent candles to scan.
+def swing_lows(df: pd.DataFrame, left: int = 5, right: int = 5) -> List[int]:
+    """Swing low pivot indices."""
+    lows = []
+    for i in range(left, len(df) - right):
+        if all(df["low"].iloc[i] <= df["low"].iloc[i - j] for j in range(1, left + 1)) and \
+           all(df["low"].iloc[i] <= df["low"].iloc[i + j] for j in range(1, right + 1)):
+            lows.append(i)
+    return lows
 
-    Returns:
-        ``{type: 'bullish'|'bearish', top, bottom, index}`` or ``None``.
+
+def detect_fvg(df: pd.DataFrame, lookback: int = 50) -> List[Dict[str, Any]]:
     """
-    n = len(df)
-    if n < 3:
-        return None
-    start = max(1, n - lookback)
-    high = df["high"].to_numpy(dtype=float)
-    low = df["low"].to_numpy(dtype=float)
-    for i in range(n - 2, start - 1, -1):
-        # gap between candle i-1 and i+1, with i as the middle.
-        if high[i - 1] < low[i + 1]:
-            return {"type": "bullish", "bottom": high[i - 1],
-                    "top": low[i + 1], "index": i}
-        if low[i - 1] > high[i + 1]:
-            return {"type": "bearish", "top": low[i - 1],
-                    "bottom": high[i + 1], "index": i}
-    return None
-
-
-def candle_anatomy(row: pd.Series) -> Dict[str, float]:
-    """Body / wick geometry of a single candle as fractions of its range.
-
-    Args:
-        row: A single OHLC row (open/high/low/close).
-
-    Returns:
-        Dict with ``range``, ``body``, ``upper_wick``, ``lower_wick``,
-        ``body_ratio``, ``upper_wick_ratio``, ``lower_wick_ratio``.
+    Fair Value Gap detection.
+    Returns list of dicts with 'index', 'top', 'bottom', 'bias'.
     """
-    o = float(row["open"])
-    h = float(row["high"])
-    low = float(row["low"])
-    c = float(row["close"])
-    rng = h - low
-    if rng <= 0:
-        return {"range": 0.0, "body": 0.0, "upper_wick": 0.0, "lower_wick": 0.0,
-                "body_ratio": 0.0, "upper_wick_ratio": 0.0, "lower_wick_ratio": 0.0}
+    fvgs = []
+    for i in range(2, min(len(df), lookback + 2)):
+        # Bullish FVG: gap between bar[i-2] high and bar[i] low
+        if df["low"].iloc[i] > df["high"].iloc[i - 2]:
+            fvgs.append({
+                "index": i,
+                "top": df["low"].iloc[i],
+                "bottom": df["high"].iloc[i - 2],
+                "bias": "LONG"
+            })
+        # Bearish FVG
+        elif df["high"].iloc[i] < df["low"].iloc[i - 2]:
+            fvgs.append({
+                "index": i,
+                "top": df["low"].iloc[i - 2],
+                "bottom": df["high"].iloc[i],
+                "bias": "SHORT"
+            })
+    return fvgs
+
+
+# ---------------------------------------------------------------------------
+# Candle & Volume Analysis
+# ---------------------------------------------------------------------------
+def candle_anatomy(df: pd.DataFrame, idx: int = -1) -> Dict[str, float]:
+    """
+    Candle body/wick ratios.
+    Returns: {body_pct, upper_wick_pct, lower_wick_pct, total_range}
+    """
+    o = df["open"].iloc[idx]
+    h = df["high"].iloc[idx]
+    l = df["low"].iloc[idx]
+    c = df["close"].iloc[idx]
+    total_range = h - l
+    if total_range <= 0:
+        return {"body_pct": 0.0, "upper_wick_pct": 0.0, "lower_wick_pct": 0.0, "total_range": 0.0}
+
     body = abs(c - o)
     upper_wick = h - max(o, c)
-    lower_wick = min(o, c) - low
+    lower_wick = min(o, c) - l
+
     return {
-        "range": rng,
-        "body": body,
-        "upper_wick": upper_wick,
-        "lower_wick": lower_wick,
-        "body_ratio": body / rng,
-        "upper_wick_ratio": upper_wick / rng,
-        "lower_wick_ratio": lower_wick / rng,
+        "body_pct": body / total_range,
+        "upper_wick_pct": upper_wick / total_range,
+        "lower_wick_pct": lower_wick / total_range,
+        "total_range": total_range
     }
 
 
-def volume_ratio(df: pd.DataFrame, window: int = 20) -> float:
-    """Latest volume relative to its trailing average.
-
-    Args:
-        df: OHLC DataFrame (needs volume).
-        window: Averaging window.
-
-    Returns:
-        current_volume / avg_volume (1.0 if avg is 0).
+def volume_ratio(df: pd.DataFrame, period: int = 20, idx: int = -1) -> float:
     """
-    if len(df) < 2:
+    Relative volume: current volume / avg volume.
+    """
+    avg_vol = df["volume"].rolling(window=period).mean().iloc[idx]
+    if avg_vol <= 0:
         return 1.0
-    avg = float(df["volume"].tail(window).mean())
-    cur = float(df["volume"].iloc[-1])
-    return cur / avg if avg > 0 else 1.0
+    return df["volume"].iloc[idx] / avg_vol
 
 
 # ---------------------------------------------------------------------------
-# Signal assembly
+# Dynamic SL/TP System (replaces hard 2R)
 # ---------------------------------------------------------------------------
-def compute_rr(entry: float, sl: float, tp: float) -> float:
-    """Reward-to-risk ratio.
-
-    Args:
-        entry: Entry price.
-        sl: Stop-loss price.
-        tp: Take-profit price.
-
-    Returns:
-        reward/risk, or 0.0 on degenerate inputs.
+def compute_dynamic_sl(df: pd.DataFrame, bias: str, entry: float, atr_mult: float = 1.5) -> float:
     """
+    Dynamic stop-loss based on ATR and structure.
+    For LONG: SL = entry - (ATR * atr_mult) or recent swing low, whichever is tighter.
+    For SHORT: SL = entry + (ATR * atr_mult) or recent swing high, whichever is tighter.
+    """
+    atr_val = atr(df)
+    if bias.upper() == "LONG":
+        atr_sl = entry - (atr_val * atr_mult)
+        swing_lows_list = swing_lows(df, left=5, right=2)
+        if swing_lows_list:
+            structure_sl = df["low"].iloc[swing_lows_list[-1]]
+            return max(atr_sl, structure_sl)  # Tighter stop
+        return atr_sl
+    else:  # SHORT
+        atr_sl = entry + (atr_val * atr_mult)
+        swing_highs_list = swing_highs(df, left=5, right=2)
+        if swing_highs_list:
+            structure_sl = df["high"].iloc[swing_highs_list[-1]]
+            return min(atr_sl, structure_sl)  # Tighter stop
+        return atr_sl
+
+
+def compute_dynamic_tp(entry: float, sl: float, bias: str, target_rr: float = DEFAULT_TP_MULT, structure_target: Optional[float] = None) -> float:
+    """
+    Dynamic take-profit based on R:R and optional structure target.
+    If structure_target is provided and better than R:R target, use structure.
+    Otherwise, use R:R multiplier.
+    """
+    risk = abs(entry - sl)
+    rr_tp = entry + (risk * target_rr) if bias.upper() == "LONG" else entry - (risk * target_rr)
+
+    if structure_target is not None:
+        if bias.upper() == "LONG" and structure_target > rr_tp:
+            return structure_target
+        elif bias.upper() == "SHORT" and structure_target < rr_tp:
+            return structure_target
+
+    return rr_tp
+
+
+def compute_rr(entry: float, sl: float, tp: float) -> float:
+    """Reward-to-risk ratio."""
     risk = abs(entry - sl)
     if risk <= 0:
         return 0.0
     return abs(tp - entry) / risk
 
 
-def enforce_min_rr(
-    entry: float, sl: float, bias: str, min_rr: float = MIN_RR
-) -> float:
-    """Return a TP that satisfies the minimum R:R for the given bias.
-
-    Args:
-        entry: Entry price.
-        sl: Stop-loss price.
-        bias: 'LONG' or 'SHORT'.
-        min_rr: Minimum reward:risk to enforce.
-
-    Returns:
-        A take-profit price at exactly ``min_rr`` from entry.
-    """
+def enforce_min_rr(entry: float, sl: float, bias: str, min_rr: float = MIN_RR) -> float:
+    """Return a TP that satisfies the minimum R:R for the given bias."""
     risk = abs(entry - sl)
     if bias.upper() == "LONG":
         return entry + min_rr * risk
     return entry - min_rr * risk
 
 
+# ---------------------------------------------------------------------------
+# Canonical Context Builders (for signal bus schema)
+# ---------------------------------------------------------------------------
+def build_trend_context(df: pd.DataFrame, ribbon: Dict[str, pd.Series]) -> Dict[str, Any]:
+    """
+    Trend context object: ribbon order, slope, compression, reclaim status.
+    """
+    ema_25 = ribbon["ema_25"].iloc[-1]
+    ema_50 = ribbon["ema_50"].iloc[-1]
+    ema_100 = ribbon["ema_100"].iloc[-1]
+    ema_200 = ribbon["ema_200"].iloc[-1]
+
+    order = "bullish" if ema_25 > ema_50 > ema_100 > ema_200 else \
+            "bearish" if ema_25 < ema_50 < ema_100 < ema_200 else "mixed"
+
+    slope_25 = (ribbon["ema_25"].iloc[-1] - ribbon["ema_25"].iloc[-5]) / ribbon["ema_25"].iloc[-5] if len(ribbon["ema_25"]) >= 5 else 0.0
+    slope_200 = (ribbon["ema_200"].iloc[-1] - ribbon["ema_200"].iloc[-5]) / ribbon["ema_200"].iloc[-5] if len(ribbon["ema_200"]) >= 5 else 0.0
+
+    compression = abs(ema_25 - ema_200) / ema_200 if ema_200 > 0 else 0.0
+    reclaim_status = "reclaimed_200" if df["close"].iloc[-1] > ema_200 and df["close"].iloc[-2] <= ema_200 else "none"
+
+    return {
+        "ribbon_order": order,
+        "slope_fast": round(slope_25, 6),
+        "slope_slow": round(slope_200, 6),
+        "compression": round(compression, 6),
+        "reclaim_status": reclaim_status
+    }
+
+
+def build_st_context(df: pd.DataFrame) -> Dict[str, Any]:
+    """
+    SuperTrend context: direction, distance, strength, phase, flip risk.
+    """
+    st, direction = supertrend(df)
+    st_val = st.iloc[-1]
+    direction_val = direction.iloc[-1]
+    close = df["close"].iloc[-1]
+
+    distance = abs(close - st_val) / st_val if st_val > 0 else 0.0
+    strength = "strong" if distance > 0.02 else "weak"
+    phase = "uptrend" if direction_val == 1 else "downtrend"
+    flip_risk = "high" if distance < 0.005 else "low"
+
+    return {
+        "direction": phase,
+        "distance": round(distance, 6),
+        "strength": strength,
+        "phase": phase,
+        "flip_risk": flip_risk
+    }
+
+
+def build_volume_context(df: pd.DataFrame) -> Dict[str, Any]:
+    """
+    Volume context: relative volume, spike state, quiet-pullback, participation grade.
+    """
+    rvol = volume_ratio(df)
+    obv_series = obv(df)
+    obv_slope = (obv_series.iloc[-1] - obv_series.iloc[-5]) / abs(obv_series.iloc[-5]) if len(obv_series) >= 5 and obv_series.iloc[-5] != 0 else 0.0
+
+    spike_state = "spike" if rvol > 2.0 else "quiet" if rvol < 0.5 else "normal"
+    participation_grade = "strong" if obv_slope > 0.05 else "weak" if obv_slope < -0.05 else "neutral"
+
+    return {
+        "relative_volume": round(rvol, 2),
+        "spike_state": spike_state,
+        "quiet_pullback": spike_state == "quiet",
+        "participation_grade": participation_grade,
+        "obv_slope": round(obv_slope, 6)
+    }
+
+
+def build_volatility_context(df: pd.DataFrame) -> Dict[str, Any]:
+    """
+    Volatility context: ATR level, expansion, compression-release state.
+    """
+    atr_val = atr(df)
+    atr_sma = atr_series(df).rolling(window=14).mean().iloc[-1] if len(df) >= 14 else atr_val
+    atr_ratio = atr_val / atr_sma if atr_sma > 0 else 1.0
+
+    expansion = "expanding" if atr_ratio > 1.2 else "compressing" if atr_ratio < 0.8 else "stable"
+
+    return {
+        "atr_level": round(atr_val, 8),
+        "atr_expansion": expansion,
+        "compression_release_state": expansion
+    }
+
+
+def build_structure_context(df: pd.DataFrame, bias: str) -> Dict[str, Any]:
+    """
+    Structure context: swing levels, BOS landmarks, target path, liquidity map.
+    """
+    swing_highs_list = swing_highs(df)
+    swing_lows_list = swing_lows(df)
+
+    last_swing_high = df["high"].iloc[swing_highs_list[-1]] if swing_highs_list else df["high"].max()
+    last_swing_low = df["low"].iloc[swing_lows_list[-1]] if swing_lows_list else df["low"].min()
+
+    bos_landmark = "bullish_bos" if df["close"].iloc[-1] > last_swing_high else \
+                   "bearish_bos" if df["close"].iloc[-1] < last_swing_low else "none"
+
+    target_path = "clear" if bos_landmark != "none" else "blocked"
+
+    fvg_list = detect_fvg(df)
+    liquidity_map = f"{len(fvg_list)}_fvgs" if fvg_list else "no_fvgs"
+
+    return {
+        "swing_levels": {
+            "last_high": round(last_swing_high, 8),
+            "last_low": round(last_swing_low, 8)
+        },
+        "bos_landmark": bos_landmark,
+        "target_path": target_path,
+        "liquidity_map": liquidity_map
+    }
+
+
+# ---------------------------------------------------------------------------
+# Signal Assembly
+# ---------------------------------------------------------------------------
 def build_signal(
     *,
     pair: str,
@@ -362,66 +457,45 @@ def build_signal(
     extra: Optional[Dict[str, Any]] = None,
     min_rr: float = MIN_RR,
 ) -> Optional[Dict[str, Any]]:
-    """Assemble a validated partial signal dict, applying the 2R hard gate.
-
-    If the raw TP does not meet ``min_rr``, the TP is stretched to exactly
-    ``min_rr`` (engines target "2R minimum"). If SL/entry are degenerate the
-    signal is rejected (``None``).
-
-    Args:
-        pair: Pair symbol (altname base, e.g. 'BTC').
-        bias: 'LONG' or 'SHORT'.
-        engine: Engine id ('S1'..'S9').
-        regime: Classified regime for the pair.
-        entry: Entry price.
-        sl: Stop-loss price.
-        tp: Proposed take-profit price.
-        structure_quality: Engine's 0-1 structure score.
-        rsi_val: Current RSI (0-100).
-        vol_ratio: Current volume ratio.
-        fg_score: Fear & Greed score.
-        kill_condition: Human-readable invalidation description.
-        extra: Optional engine-specific fields to merge in.
-        min_rr: Minimum reward:risk (default 2.0).
-
-    Returns:
-        A partial signal dict, or ``None`` if it cannot form a valid trade.
-        The scanner fills ``ai_st_direction``/``ai_st_strength``/
-        ``mtf_alignment`` before scoring.
     """
-    bias = bias.upper()
-    if entry <= 0 or sl <= 0 or entry == sl:
+    Assemble a validated partial signal dict with dynamic SL/TP and context objects.
+    If the raw TP does not meet `min_rr`, the TP is stretched to exactly `min_rr`.
+    """
+    if not pair or not bias or not engine:
         return None
-    # Sanity: SL must be on the correct side of entry.
-    if bias == "LONG" and sl >= entry:
-        return None
-    if bias == "SHORT" and sl <= entry:
+    if entry <= 0 or sl <= 0 or tp <= 0:
         return None
 
+    # Validate bias direction
+    if bias.upper() == "LONG" and not (sl < entry < tp):
+        return None
+    if bias.upper() == "SHORT" and not (tp < entry < sl):
+        return None
+
+    # Enforce minimum R:R
     rr = compute_rr(entry, sl, tp)
     if rr < min_rr:
         tp = enforce_min_rr(entry, sl, bias, min_rr)
         rr = compute_rr(entry, sl, tp)
 
-    signal: Dict[str, Any] = {
+    signal = {
         "pair": pair,
-        "bias": bias,
+        "bias": bias.upper(),
         "engine": engine,
         "regime": regime,
-        "entry": round(float(entry), 8),
-        "sl": round(float(sl), 8),
-        "tp": round(float(tp), 8),
-        "rr": round(float(rr), 3),
-        "structure_quality": round(float(min(max(structure_quality, 0.0), 1.0)), 4),
-        "rsi": round(float(rsi_val), 2),
-        "volume_ratio": round(float(vol_ratio), 4),
-        "fg_score": int(fg_score),
+        "entry": round(entry, 8),
+        "sl": round(sl, 8),
+        "tp": round(tp, 8),
+        "rr": round(rr, 2),
+        "structure_quality": round(structure_quality, 2),
+        "rsi": round(rsi_val, 1),
+        "vol_ratio": round(vol_ratio, 2),
+        "fg_score": fg_score,
         "kill_condition": kill_condition,
-        # Placeholders filled by the scanner:
-        "ai_st_direction": None,
-        "ai_st_strength": 0.0,
-        "mtf_alignment": "PARTIAL",
     }
+
     if extra:
         signal.update(extra)
+
     return signal
+"""
