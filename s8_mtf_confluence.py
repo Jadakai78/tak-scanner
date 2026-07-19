@@ -16,11 +16,8 @@ from typing import Any, Callable, Dict, Optional
 
 import pandas as pd
 
-try:
-    from ._common import ema, swing_highs, swing_lows
-except ImportError:
-    sys.path.insert(0, str(Path(__file__).resolve().parent))
-    from _common import ema, swing_highs, swing_lows  # type: ignore
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _common import ema, swing_highs, swing_lows
 
 logging.basicConfig(
     level=logging.INFO,
