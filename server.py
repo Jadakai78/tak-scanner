@@ -461,5 +461,20 @@ def kraken_positions():
 
 
 
+@app.route("/api/seed", methods=["POST", "GET"])
+def seed_from_kv():
+    """Force-pull CF KV data into local volume. Call after cold start."""
+    import urllib.request
+    try:
+        with urllib.request.urlopen(f"{CF_WORKER_URL}/api/signals", timeout=10) as resp:
+            data = resp.read()
+            SIGNAL_BUS.write_bytes(data)
+            bus = json.loads(data)
+            sigs = len(bus.get("signals", []))
+            return jsonify({"ok": True, "signals_seeded": sigs})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000, debug=False)
