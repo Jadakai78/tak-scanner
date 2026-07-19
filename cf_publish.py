@@ -12,7 +12,7 @@ from typing import Any, Dict, Optional
 
 import requests
 
-CF_WORKER_URL = "https://jhl-signal-bus.blazing0478.workers.dev/update"
+CF_WORKER_URL = "https://giving-wisdom-production-9b27.up.railway.app/update"
 CF_SECRET = "jhl2026dragon"
 DEFAULT_TIMEOUT = 12
 
