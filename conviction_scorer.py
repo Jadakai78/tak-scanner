@@ -150,6 +150,56 @@ class ConvictionScorer:
         return _sf(sig.get("structure_quality"), 0.5)
 
     @staticmethod
+    def _oracle_modifier(sig: Dict[str, Any]) -> float:
+        """
+        Apply Oracle HTF conviction modifier.
+        Oracle bonus: signal aligns with HTF bias → +conviction_bonus
+        Oracle penalty: signal fights HTF bias → -conviction_penalty
+        RSI-8 alignment: D1 RSI-8 > 55 and LONG signal → additional +3
+        """
+        oracle = sig.get("oracle", {})
+        if not oracle:
+            return 0.0
+        htf_bias    = str(oracle.get("bias", "NEUTRAL")).upper()
+        sig_bias    = str(sig.get("bias", "")).upper()
+        bonus       = float(oracle.get("conviction_bonus", 0.0))
+        penalty     = float(oracle.get("conviction_penalty", 0.0))
+        rsi8_d1     = float(oracle.get("rsi8_d1", 50.0))
+        no_trade    = bool(oracle.get("no_trade_zone", False))
+        pd_zone     = str(oracle.get("premium_discount", "FAIR"))
+
+        if htf_bias == "NEUTRAL" or not sig_bias:
+            return 0.0
+
+        modifier = 0.0
+        if sig_bias == htf_bias:
+            modifier += bonus
+            # RSI-8 momentum alignment bonus
+            if sig_bias == "LONG" and rsi8_d1 > 55:
+                modifier += 3.0
+            elif sig_bias == "SHORT" and rsi8_d1 < 45:
+                modifier += 3.0
+            # Discount zone buying = extra conviction
+            if sig_bias == "LONG" and pd_zone == "DISCOUNT":
+                modifier += 4.0
+            elif sig_bias == "SHORT" and pd_zone == "PREMIUM":
+                modifier += 4.0
+        else:
+            # Counter-trend = penalty
+            modifier -= penalty
+            # Buying in PREMIUM or selling in DISCOUNT = extra penalty
+            if sig_bias == "LONG" and pd_zone == "PREMIUM":
+                modifier -= 5.0
+            elif sig_bias == "SHORT" and pd_zone == "DISCOUNT":
+                modifier -= 5.0
+
+        # No-trade zone penalty
+        if no_trade:
+            modifier -= 8.0
+
+        return round(modifier, 2)
+
+    @staticmethod
     def _htf_bias(sig: Dict[str, Any]) -> float:
         bias = str(sig.get("bias", "")).upper()
         direction = str(sig.get("ai_st_direction", "")).upper()
