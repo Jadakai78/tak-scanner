@@ -179,17 +179,11 @@ ACCOUNTS = [
 
 
 def load_signal_bus():
-    """Load bus from CF KV (primary source of truth) — local disk as fallback only."""
-    import urllib.request
+    """Load bus from local disk — one service, one filesystem, scanner writes here directly."""
     try:
-        with urllib.request.urlopen(f"{CF_WORKER_URL}/api/signals", timeout=8) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
-    except Exception:
-        # Fallback: local disk (may be stale on giving-wisdom service)
-        try:
-            data = json.loads(SIGNAL_BUS.read_text())
-        except Exception:
-            data = {"signals": [], "rts_signals": []}
+        data = json.loads(SIGNAL_BUS.read_text())
+    except (FileNotFoundError, json.JSONDecodeError):
+        data = {"signals": [], "rts_signals": []}
 
     # Inject account data
     baselines = data.get("session_baselines", {})
@@ -278,16 +272,11 @@ def icon512():
 # ── Execution endpoints ─────────────────────────────────────────────────────
 
 def _fetch_bus_from_kv() -> dict:
-    """Fetch the live bus from CF KV — single source of truth."""
-    import urllib.request
+    """Read bus from local disk — one service, scanner and server share same filesystem."""
     try:
-        with urllib.request.urlopen(f"{CF_WORKER_URL}/api/signals", timeout=8) as resp:
-            return json.loads(resp.read().decode("utf-8"))
+        return json.loads(SIGNAL_BUS.read_text())
     except Exception:
-        try:
-            return json.loads(SIGNAL_BUS.read_text())
-        except Exception:
-            return {"signals": []}
+        return {"signals": []}
 
 
 def _push_verdict_to_kv(bus: dict):
