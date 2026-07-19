@@ -8,7 +8,7 @@ import requests
 # --- CONFIG -------------------------------------------------------------
 
 # Source worker
-SOURCE_URL = "https://rtssnipercouncil.blazing0478.workers.dev"
+SOURCE_URL = "https://giving-wisdom-production-9b27.up.railway.app/api/signals"
 SOURCE_SECRET = "test123"  # same secret you used in the worker env
 
 # Event filter – adjust if you want more than signals for PropOne
