@@ -317,10 +317,11 @@ def _push_verdict_to_kv(bus: dict):
             return resp.status == 200
     except Exception as _e:
                 _aging_logger.warning("KV verdict push failed: %s", _e)
-        # ── Always write locally so verdict survives CF being down ──
-        try: SIGNAL_BUS.write_text(json.dumps(bus, ensure_ascii=False, indent=2))
-        except Exception: pass
-        return False
+   # ── Always write locally so verdict survives CF being down ──
+   try:
+       SIGNAL_BUS.write_text(json.dumps(bus, ensure_ascii=False, indent=2))
+   except Exception:
+       pass
 
 
 @app.route("/api/position/execute", methods=["POST"])
