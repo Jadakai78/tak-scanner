@@ -20,6 +20,7 @@ from __future__ import annotations
 import json
 import logging
 import math
+import os
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -33,8 +34,7 @@ MODULE_DIR  = Path(__file__).resolve().parent
 MODELS_DIR  = MODULE_DIR / "models"
 
 # ── Hard gates ────────────────────────────────────────────────────────────────
-MIN_RR        = 2.0
-SCORE_CAP     = 99.0   # raw 0-100 scale
+MIN_RR         = float(os.getenv("MIN_RR", "2.0"))  # Configurable minimum R:R ratio (default 2.0)SCORE_CAP     = 99.0   # raw 0-100 scale
 MAX_BONUS_MULT = 3.0   # bonuses stack up to 3×
 
 # ── Feed threshold names (filter only — NOT stamped on signals) ───────────────
