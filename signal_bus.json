@@ -6,11 +6,10 @@
     "session": "Asia",
     "activepairs": 686,
     "deadpairs": 0,
-    "market_phase": "HOT",  // HOT/WARM/COLD/DEAD
+    "market_phase": "HOT",
     "sgrade_count": 2,
     "agrade_count": 5
   },
-  
   "council": {
     "bot_claims": [
       {
@@ -23,29 +22,26 @@
             "score": 87.5,
             "side": "LONG",
             "confidence": 0.82,
-            "remi_status": "approved",  // approved/caution/killed
-            "april_status": "healthy",  // healthy/warning/danger
+            "remi_status": "approved",
+            "april_status": "healthy",
             "entry_idea": 67450.0,
             "stop_idea": 66800.0,
             "target_idea": 69200.0,
             "thesis": "Exhaustion reclaim at ribbon + HTF support"
           }
-          // ... top 10
         ]
       },
       {
         "bot": "S7",
         "name": "Range Scalper",
         "active_claims": 8,
-        "top_claims": [...]
+        "top_claims": []
       }
-      // ... all active bots
     ]
   },
-  
   "april": {
     "open_positions": 4,
-    "total_pnl": 127.50,
+    "total_pnl": 127.5,
     "at_risk": 340.0,
     "warnings": [
       {
@@ -56,7 +52,6 @@
       }
     ]
   },
-  
   "remi": {
     "recent_kills": [
       {
@@ -64,10 +59,8 @@
         "reason": "Low confidence 0.42 < 0.55",
         "timestamp": "2026-07-20T10:03:22Z"
       }
-      // ... last 10 kills
     ]
   },
-  
   "tak": {
     "lastscan": "2026-07-20T10:00:00Z",
     "nextscan": "2026-07-20T10:20:00Z",
@@ -75,7 +68,6 @@
     "cf_workers_ok": true,
     "scheduler_ok": true
   },
-  
-  "signals": [...],  // Keep existing
-  "killedsignals": [...]
+  "signals": [],
+  "killedsignals": []
 }
