@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, Iterable, List, Optional
 from datetime import datetime, timezone
 import math
+
 PROP_WHITELIST = {
     "symbol",
     "base",
