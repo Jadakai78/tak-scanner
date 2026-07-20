@@ -43,7 +43,8 @@ from microstructure import enrich as micro_enrich
 from pair_universe import PairUniverse, PROP_WHITELIST
 from regime_classifier import RegimeClassifier
 from signal_bus import SignalBus
-from strategies import (
+from strategies import
+from pair_universe import PairUniverse, MarketDataSource(
     ENGINE_CLASSES,
     score_delta_context,
 )
@@ -273,7 +274,6 @@ class RTSSniper:
     """
 
     def __init__(self, max_pairs: Optional[int] = None) -> None:
-    from pair_universe import PairUniverse, MarketDataSource
         self.universe = PairUniverse(MarketDataSource())
         self.regime_cl = RegimeClassifier()
         self.bus       = SignalBus()
