@@ -129,6 +129,7 @@
         .stat-val.green { color: var(--green); }
         .stat-val.red { color: var(--red); }
         .stat-val.amber { color: var(--amber); }
+        .stat-val.purple { color: var(--purple); }
 
         .filter-bar {
             display: flex;
@@ -373,16 +374,16 @@
 <div class="main">
     <div class="stats-row">
         <div class="stat-card">
-            <div class="stat-label">Hot</div>
-            <div class="stat-val red" id="cnt-hot">—</div>
+            <div class="stat-label">Bots</div>
+            <div class="stat-val" id="cnt-bots">—</div>
         </div>
         <div class="stat-card">
-            <div class="stat-label">Total</div>
-            <div class="stat-val" id="cnt-total">—</div>
+            <div class="stat-label">Traps</div>
+            <div class="stat-val amber" id="cnt-traps">—</div>
         </div>
         <div class="stat-card">
-            <div class="stat-label">Confirm</div>
-            <div class="stat-val green" id="cnt-confirm">—</div>
+            <div class="stat-label">Gimbas</div>
+            <div class="stat-val purple" id="cnt-gimbas">—</div>
         </div>
     </div>
 
@@ -432,7 +433,11 @@
 const API = 'https://giving-wisdom-production-9b27.up.railway.app/api/signals';
 const REFRESH_SEC = 60;
 let allSignals = [];
+let allRtsSignals = [];
 let currentFilter = 'all';
+
+const BOT_ENGINES   = new Set(['S1','S2','S4','S5','S6','S7','S8','S9']);
+const GIMBA_ENGINES = new Set(['S3','S10']);
 let countdownVal = REFRESH_SEC;
 let refreshTimer;
 let countdownTimer;
@@ -499,11 +504,21 @@ function fmtTrap(v) {
     return (n * 100).toFixed(0) + '%';
 }
 
+function getEngineName(sig) {
+    return (sig.engine ?? sig.strategy ?? sig.specialist ?? '').toUpperCase().trim();
+}
+
+function matchesBiasFilter(sig, filter) {
+    const b = (sig.bias || '').toUpperCase();
+    if (filter === 'LONG') return b === 'LONG' || b === 'BUY' || b === 'BULLISH';
+    return b === 'SHORT' || b === 'SELL' || b === 'BEARISH';
+}
+
 function setFilter(f, btn) {
     currentFilter = f;
     document.querySelectorAll('.filter-pill').forEach((p) => p.classList.remove('active'));
     btn.classList.add('active');
-    renderSignals(allSignals);
+    renderSignals(allSignals, allRtsSignals);
 }
 
 function applyFilter(sigs) {
@@ -513,12 +528,18 @@ function applyFilter(sigs) {
         return sigs.filter((s) => (s.december_verdict || 'PENDING').toUpperCase() === currentFilter);
     }
     if (['LONG', 'SHORT'].includes(currentFilter)) {
-        return sigs.filter((s) => {
-            const b = (s.bias || '').toUpperCase();
-            if (currentFilter === 'LONG') return b === 'LONG' || b === 'BUY' || b === 'BULLISH';
-            return b === 'SHORT' || b === 'SELL' || b === 'BEARISH';
-        });
+        return sigs.filter((s) => matchesBiasFilter(s, currentFilter));
     }
+    return sigs;
+}
+
+function applyFilterRts(sigs) {
+    if (currentFilter === 'all') return sigs;
+    if (currentFilter === 'hot') return sigs.filter((s) => conv(s) >= 75);
+    if (['LONG', 'SHORT'].includes(currentFilter)) {
+        return sigs.filter((s) => matchesBiasFilter(s, currentFilter));
+    }
+    // CONFIRM/PENDING/WAIT filters pass through all RTS signals (they use different verdict fields)
     return sigs;
 }
 
@@ -562,52 +583,58 @@ function renderCard(sig) {
     </div>`;
 }
 
-function renderSignals(sigs) {
+function renderSignals(sigs, rtsSigs) {
+    rtsSigs = rtsSigs || [];
     const container = document.getElementById('signals-container');
-    const filtered = applyFilter(sigs);
 
-    document.getElementById('cnt-total').textContent = sigs.length;
-    document.getElementById('cnt-hot').textContent = sigs.filter((s) => conv(s) >= 75).length;
-    document.getElementById('cnt-confirm').textContent = sigs.filter((s) => (s.december_verdict || '').toUpperCase() === 'CONFIRM').length;
+    // Categorise bot/gimba signals from the signals array
+    const botSigs   = sigs.filter((s) => BOT_ENGINES.has(getEngineName(s)));
+    const gimbaSigs = sigs.filter((s) => GIMBA_ENGINES.has(getEngineName(s)));
 
-    if (filtered.length === 0) {
+    // Update section counts (always unfiltered)
+    document.getElementById('cnt-bots').textContent   = botSigs.length;
+    document.getElementById('cnt-traps').textContent  = rtsSigs.length;
+    document.getElementById('cnt-gimbas').textContent = gimbaSigs.length;
+
+    // Apply the current filter to each group
+    const filteredBots   = applyFilter(botSigs);
+    const filteredTraps  = applyFilterRts(rtsSigs);
+    const filteredGimbas = applyFilter(gimbaSigs);
+
+    if (filteredBots.length === 0 && filteredTraps.length === 0 && filteredGimbas.length === 0) {
         container.innerHTML = `<div class="empty-state"><div class="empty-icon">📡</div><div class="empty-title">No signals${currentFilter !== 'all' ? ' for this filter' : ''}</div><div class="empty-body">No live signals matched the current view.</div></div>`;
         return;
     }
 
-    const sorted = [...filtered].sort((a, b) => {
-        const va = a.december_verdict || 'PENDING';
-        const vb = b.december_verdict || 'PENDING';
-        const order = { CONFIRM: 0, PENDING: 1, WAIT: 2, EXPIRED: 3, REJECT: 4 };
-        const oa = order[va.toUpperCase()] ?? 5;
-        const ob = order[vb.toUpperCase()] ?? 5;
-        if (oa !== ob) return oa - ob;
-        return conv(b) - conv(a);
-    });
-
-    const groups = {};
-    sorted.forEach((s) => {
-        const v = (s.december_verdict || 'PENDING').toUpperCase();
-        if (!groups[v]) groups[v] = [];
-        groups[v].push(s);
-    });
-
-    const labels = {
-        CONFIRM: '✅ Confirmed Positions',
-        PENDING: '⏳ Pending Signals',
-        WAIT: '👁 Wait — Monitor',
-        EXPIRED: '🕓 Expired',
-        REJECT: '✗ Rejected'
-    };
+    function sortByConviction(arr) {
+        return [...arr].sort((a, b) => {
+            const va = a.december_verdict || 'PENDING';
+            const vb = b.december_verdict || 'PENDING';
+            const order = { CONFIRM: 0, PENDING: 1, WAIT: 2, EXPIRED: 3, REJECT: 4 };
+            const oa = order[va.toUpperCase()] ?? 5;
+            const ob = order[vb.toUpperCase()] ?? 5;
+            if (oa !== ob) return oa - ob;
+            return conv(b) - conv(a);
+        });
+    }
 
     let html = '';
-    ['CONFIRM', 'PENDING', 'WAIT', 'EXPIRED', 'REJECT'].forEach((g) => {
-        if (!groups[g] || groups[g].length === 0) return;
-        html += `<div class="section-label">${labels[g] || g} (${groups[g].length})</div>`;
-        groups[g].forEach((s) => {
-            html += renderCard(s);
-        });
-    });
+
+    if (filteredBots.length > 0) {
+        html += `<div class="section-label">🤖 Bots (${filteredBots.length})</div>`;
+        sortByConviction(filteredBots).forEach((s) => { html += renderCard(s); });
+    }
+
+    if (filteredTraps.length > 0) {
+        html += `<div class="section-label">⚡ Traps (${filteredTraps.length})</div>`;
+        filteredTraps.forEach((s) => { html += renderCard(s); });
+    }
+
+    if (filteredGimbas.length > 0) {
+        html += `<div class="section-label">🔮 Gimbas (${filteredGimbas.length})</div>`;
+        sortByConviction(filteredGimbas).forEach((s) => { html += renderCard(s); });
+    }
+
     container.innerHTML = html;
 }
 
@@ -624,6 +651,8 @@ async function loadSignals(manual = false) {
 
         const sigs = data.signals ?? data ?? [];
         allSignals = Array.isArray(sigs) ? sigs : [];
+        const rts = data.rts_signals ?? [];
+        allRtsSignals = Array.isArray(rts) ? rts : [];
 
         const lastscan = data.lastscan ?? data.last_scan ?? (data.tak && data.tak.lastscan);
         const regime = data.regime ?? (data.tak && data.tak.regime);
@@ -639,7 +668,7 @@ async function loadSignals(manual = false) {
             strip.style.display = 'none';
         }
 
-        renderSignals(allSignals);
+        renderSignals(allSignals, allRtsSignals);
         pulse.className = 'pulse-dot';
         document.getElementById('last-updated').textContent = 'Updated ' + new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
         resetCountdown();
