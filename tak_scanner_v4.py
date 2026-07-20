@@ -62,13 +62,13 @@ def build_bus_payload(
     quiethours: bool,
     sprintmode: bool,
     april_view: Optional[Dict[str, Any]] = None,
+    oracle: Optional[Dict[str, Any]] = None,
+    council: Optional[Dict[str, Any]] = None,
+    april: Optional[Dict[str, Any]] = None,
+    remi: Optional[Dict[str, Any]] = None,
+    tak: Optional[Dict[str, Any]] = None
 ) -> Dict[str, Any]:
-    """
-    Builds the canonical bus payload snapshot.
-    
-    Returns a dictionary ready for JSON serialization and bus transmission.
-    Includes optional April integration view.
-    """
+    """Build complete signal bus payload with Oracle, Council, April, Remi, and Tak data"""
     payload = {
         "lastscan": lastscan,
         "nextscan": nextscan,
@@ -83,6 +83,19 @@ def build_bus_payload(
         "sprintmode": sprintmode,
     }
     
+    # Add new dashboard sections if provided
+    if oracle is not None:
+        payload["oracle"] = oracle
+    if council is not None:
+        payload["council"] = council
+    if april is not None:
+        payload["april"] = april
+    if remi is not None:
+        payload["remi"] = remi
+    if tak is not None:
+        payload["tak"] = tak
+    
+    # Legacy april_view for backward compatibility
     if april_view is not None:
         payload["april_view"] = april_view
     
@@ -307,6 +320,11 @@ class TakScannerV4:
             quiethours=quiet,
             sprintmode=sprintmode,
             april_view=april_view,
+            oracle=oracle_data,
+            council=council_data,
+            april=april_data,
+            remi=remi_data,
+            tak=tak_data,
         )
         
         # Update bus (legacy interface)
