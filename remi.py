@@ -81,17 +81,24 @@ class Remi:
         # 🚨 EMERGENCY TRIAGE: Bypass kills for high-conviction signals
         conviction = signal.get("conviction", signal.get("score", 0))
         pair = signal.get("pair", "UNKNOWN")
+        try:
+            conviction = float(conviction or 0)
+        except Exception:
+            conviction = 0.0
 
-            if conviction >= 0.75:
+        # Normalize 0..1 to percent so both formats work
+        conv_pct = conviction * 100 if conviction <= 1.0 else conviction
+
+        if conv_pct >= 75.0:
             logger.warning(
-                                f"🚨 TRIAGE BYPASS: {pair} conviction={conviction:.2f} "
-                                f"- bypassing Remi kill/caution logic"
-                            )
-                            return {
-                                                "status": "CLEAN",
-                                                "reason": None,
-                                                "caution": False
-                                            }
+                f"🚨 TRIAGE BYPASS: {pair} conviction={conv_pct:.1f} "
+                f"- bypassing Remi kill/caution logic"
+            )
+            return {
+                "status": "CLEAN",
+                "reason": None,
+                "caution": False
+            }
                 
         now = now or datetime.now(timezone.utc)
         bias = str(signal.get("bias", "")).upper()
