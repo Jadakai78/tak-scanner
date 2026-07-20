@@ -158,7 +158,8 @@ class TakScannerV4:
                     logger.warning(f"Insufficient OHLC data for {pair}, skipping")
                     continue
                 
-                candidate = engine.generate(pair, ohlc_df, regime, fg, aist)                                if candidate:
+                candidate = engine.generate(pair, ohlc_df, regime, fg, aist)
+                if candidate:
                     # Enrich with microstructure
                     enriched = microenrich(candidate)
                     
