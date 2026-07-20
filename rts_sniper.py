@@ -435,18 +435,6 @@ if __name__ == "__main__":
         f"{result.get('rts_s_grade', 0)} S-grade | "
         f"{result.get('rts_duration_sec', 0)}s"
     )
-        # ── write own bus lane ────────────────────────────────────────────────
-        self._write_bus(signals, fg, now, duration)
-
-        # ── fire alerts ──────────────────────────────────────────────────────
-        sammys = [s for s in signals if s["grade"] == SAMMY_GRADE]
-        self._fire_alerts(sammys)
-
-        return {
-            "rts_signals_fired": len(signals),
-            "rts_s_grade": s_count,
-            "rts_duration_sec": duration,
-        }
 
     # ── OHLC helpers ──────────────────────────────────────────────────────────
 
