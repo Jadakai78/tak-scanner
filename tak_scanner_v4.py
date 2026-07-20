@@ -106,7 +106,8 @@ class TakScannerV4:
     def __init__(self):
         self.scorer = ConvictionScorer()
         self.remi = Remi()
-        self.bus = SignalBus()
+        # Ensure scanner writes to the underscore-named bus file scheduler expects
+        self.bus = SignalBus(path=MODULE_DIR / "signal_bus.json")
         self.classifier = RegimeClassifier()
         self.universe = PairUniverse()
         self.last_signals = []
