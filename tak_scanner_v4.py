@@ -162,74 +162,56 @@ class TakScannerV4:
         regime_map = {}
         stats = {"scanned": len(active), "signaled": 0, "killed": 0}
         
+        # V4 ORCHESTRATOR PATTERN: Build contexts for all pairs, run specialists -> REMI -> APRIL
+        logger.info("V4 building contexts for %s active pairs", len(active))
+        contexts = []
         for pair in active:
-            try:
-                regime = self.classifier.classify(pair)
-                regime_map[pair] = regime
+            regime = self.classifier.classify(pair)
+            regime_map[pair] = regime
+            context = PairContext(
+                pair=pair,
+                market_regime=regime,
+                timeframe="1h",
+                fear_greed=fg,
+                session=None,
+                indicators={},
+                market_state={},
+            )
+            contexts.append(context)
+        
+        # Run orchestrator: specialists -> REMI -> APRIL
+        shared_state = {"fgscore": fg, "timeframe": "1h"}
+        logger.info("V4 calling orchestrator with %s contexts", len(contexts))
+        candidates = self.orchestrator.run(contexts, shared_state)
+        logger.info("V4 orchestrator returned %s candidates", len(candidates))
+        
+        # Convert CandidateSignal objects to dict format for backward compatibility
+        for candidate in candidates:
+            signal_dict = {
+                "pair": candidate.pair,
+                "setup_type": candidate.setup_type,
+                "side": candidate.side,
+                "specialist": candidate.specialist,
+                "thesis": candidate.thesis,
+                "score": candidate.score,
+                "confidence": candidate.confidence,
+                "entry_idea": candidate.entry_idea,
+                "stop_idea": candidate.stop_idea,
+                "target_idea": candidate.target_idea,
+                "warnings": candidate.warnings,
+                "tags": candidate.tags,
+                "context": candidate.context,
+                "conviction": candidate.score,
+                "timestamp": now.isoformat(),
+            }
+            
+            # Route based on council decision
+            if candidate.council and candidate.council.route == "killed_signals":
+                killed.append(signal_dict)
+                stats["killed"] += 1
+            else:
+                signals.append(signal_dict)
                 
-                aist = AISupertrend(pair)
-                # choose engine class robustly
-                engine_class = REGIME_ENGINES.get(regime)
-                if engine_class is None:
-                    if isinstance(ENGINE_CLASSES, (list, tuple)):
-                        engine_class = ENGINE_CLASSES[0]
-                    elif isinstance(ENGINE_CLASSES, dict):
-                        engine_class = next(iter(ENGINE_CLASSES.values()))
-                    else:
-                        raise TypeError("Unexpected ENGINE_CLASSES type")
-                engine = engine_class()
-                
-                # Fetch OHLC data for specialist strategies
-                ohlc_df = self.universe.fetch_ohlc(pair, interval=60)  # 1h candles
-                if ohlc_df is None or len(ohlc_df) < 50:
-                    logger.warning(f"Insufficient OHLC data for {pair}, skipping")
-                    continue
-                
-                candidate = engine.generate(pair, ohlc_df, regime, fg, aist)                                
-                if candidate:
-                    # Enrich with microstructure
-                    enriched = microenrich(candidate)
-                    
-                    # MTF confluence check
-                    mtf = S8MTFConfluence()
-                    try:
-                        mtf_result = mtf.check_alignment(pair)
-                    except Exception as e:
-                        logger.debug(f"MTF check failed for {pair}: {e}")
-                        mtf_result = None
-                    if mtf_result:
-                        enriched.update(mtf_result)
-                    
-                    # Score conviction
-                    try:
-                        score = self.scorer.score(enriched)
-                    except Exception as e:
-                        logger.debug(f"Scoring failed for {pair}: {e}")
-                        score = 0
-                    enriched["conviction"] = score
-
-                    # attach timestamp for TTL tracking
-                    signal_time = datetime.now(timezone.utc).isoformat()
-                    enriched["timestamp"] = signal_time
-                    
-                    # Determine action state
-                    action_state = self._resolve_action_state(enriched, pair)
-                    enriched["action_state"] = action_state
-                    
-                    if action_state == "Killed":
-                        killed.append(enriched)
-                        stats["killed"] += 1
-                    else:
-                        signals.append(enriched)
-                        stats["signaled"] += 1
-                        # record for TTL tracking (keep a minimal record)
-                        try:
-                            self.last_signals.append({"pair": pair, "timestamp": signal_time})
-                        except Exception:
-                            logger.debug("Failed to append to last_signals")
-                        
-            except Exception as e:
-                logger.exception(f"Error scanning {pair}: {e}")
         
         # trim last_signals to avoid unbounded growth
         try:
