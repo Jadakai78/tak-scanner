@@ -241,6 +241,9 @@ class TakScannerV4:
         quiet = now.hour not in SCAN_HOURS_UTC
         sprintmode = False  # Placeholder for future logic
         
+        # Build april_view once so payload and live bus remain identical
+        april_view = self._build_april_view() if self.april_enabled else None
+
         # Build canonical payload
         payload = build_bus_payload(
             lastscan=now.isoformat(),
@@ -254,7 +257,7 @@ class TakScannerV4:
             sessionstats=stats,
             quiethours=quiet,
             sprintmode=sprintmode,
-            april_view=self._build_april_view() if self.april_enabled else None,
+            april_view=april_view,
         )
         
         # Update bus (legacy interface)
@@ -271,9 +274,10 @@ class TakScannerV4:
                 sessionstats=stats,
                 quiethours=quiet,
                 sprintmode=sprintmode,
+                april_view=april_view,
             )
         except Exception as e:
-            logger.debug(f"Bus update failed: {e}")
+            logger.debug(f"Bus update_failed: {e}")
         
         # Write snapshot to disk
         snapshot_path = MODULE_DIR / "signal_bus.json"
