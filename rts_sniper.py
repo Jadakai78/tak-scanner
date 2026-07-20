@@ -40,11 +40,11 @@ import requests
 
 from conviction_scorer import ConvictionScorer, score_v2_shadow
 from microstructure import enrich as micro_enrich
-from pair_universe import PairUniverse, PROP_WHITELIST
+from pair_universe import PairUniverse, MarketDataSource, PROP_WHITELIST
 from regime_classifier import RegimeClassifier
 from signal_bus import SignalBus
-from strategies import
-from pair_universe import PairUniverse, MarketDataSource(
+from strategies import ENGINE_CLASSES, score_delta_context
+(
     ENGINE_CLASSES,
     score_delta_context,
 )
