@@ -265,6 +265,8 @@ def load_signal_bus():
             or 0
         )
 
+    # ── Deployment fingerprint — TEMPORARY, remove after confirming live ──────
+    data["_server_normalizer"] = "v3-active"
     # ─────────────────────────────────────────────────────────────────────────
 
     # Inject account data
