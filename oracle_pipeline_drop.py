@@ -345,7 +345,7 @@ class APRIL:
             reasons.extend(trap.reasons)
             tags.append("trap_kill")
             return CouncilDecision(
-                route=Route.KILLED,
+                route=trap.route_override or Route.KILLED,
                 status="killed_by_rts",
                 council_score=0.0,
                 reasons=reasons,
@@ -443,8 +443,8 @@ class ScannerEngine:
             trap_risk=trap.trap_risk,
             route=council.route,
             status=council.status,
-            reasons=observation.reasons + review.reasons + trap.reasons + council.reasons,
-            warnings=observation.warnings + review.warnings + council.warnings,
+            reasons=observation.reasons + council.reasons,
+            warnings=observation.warnings + council.warnings,
             tags=council.tags,
             oracle_bias=oracle_state.bias,
             metadata={
@@ -457,6 +457,7 @@ class ScannerEngine:
         )
 
     def run_scan(self) -> SignalSnapshot:
+        self.router = SignalRouter()
         oracle_state = self.oracle.get_state()
         active_pairs = self.universe.get_active_pairs()
         debug_rows: List[Dict[str, Any]] = []
