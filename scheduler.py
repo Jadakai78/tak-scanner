@@ -76,7 +76,7 @@ def push_to_cf():
         with urllib.request.urlopen(req, timeout=15) as resp:
             logger.info("CF KV push OK — HTTP %s", resp.status)
     except urllib.error.HTTPError as e:
-        body = e.read().decode("utf-8", errors="ignore")[:200]
+                            body = e.read().decode("utf-8", errors="ignore")[:200]
         logger.error("CF KV push HTTP error: %s %s — %s", e.code, e.reason, body)
     except Exception as e:
         logger.error("CF KV push failed: %s", e)
