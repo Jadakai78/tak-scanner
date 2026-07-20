@@ -280,7 +280,7 @@ class TakScannerV4:
             logger.debug(f"Bus update_failed: {e}")
         
         # Write snapshot to disk
-        snapshot_path = MODULE_DIR / "signal_bus.json"
+        snapshot_path = self.bus.path
         write_bus_snapshot(payload, snapshot_path)
         
         # Fire alerts
