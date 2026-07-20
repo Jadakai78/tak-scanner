@@ -18,7 +18,7 @@ MODULE_DIR = Path(__file__).resolve().parent
 # Canonical runtime location (volume mount) — default for writers
 APP_DATA = Path("/app/data")
 SIGNALBUS_PATH = APP_DATA / "signal_bus.json"
-TMP_PATH = APP_DATA / "signalbus.tmp.json"
+TMP_PATH = APP_DATA / "signal_bus.tmp.json"
 # Legacy fallbacks (read-only compatibility)
 LEGACY_SIGNALBUS = MODULE_DIR / "signalbus.json"
 LEGACY_SIGNAL_BUS = MODULE_DIR / "signal_bus.json"
