@@ -129,6 +129,24 @@
         .stat-val.green { color: var(--green); }
         .stat-val.red { color: var(--red); }
         .stat-val.amber { color: var(--amber); }
+        .stat-val.teal { color: var(--teal); }
+        .stat-val.purple { color: var(--purple); }
+        .stat-val.blue { color: var(--blue); }
+
+        .category-tag {
+            display: inline-flex;
+            align-items: center;
+            padding: 2px 7px;
+            border-radius: var(--r-sm);
+            font-size: 10px;
+            font-weight: 700;
+            letter-spacing: 0.06em;
+            flex-shrink: 0;
+            margin-left: 6px;
+        }
+        .category-tag.S1  { background: var(--blue-dim);   color: var(--blue); }
+        .category-tag.S3  { background: var(--teal-dim);   color: var(--teal); }
+        .category-tag.S10 { background: var(--purple-dim); color: var(--purple); }
 
         .filter-bar {
             display: flex;
@@ -386,6 +404,21 @@
         </div>
     </div>
 
+    <div class="stats-row">
+        <div class="stat-card">
+            <div class="stat-label">GIMBA (S3+S10)</div>
+            <div class="stat-val teal" id="cnt-gimba">—</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-label">S1</div>
+            <div class="stat-val blue" id="cnt-s1">—</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-label">S10</div>
+            <div class="stat-val purple" id="cnt-s10">—</div>
+        </div>
+    </div>
+
     <div class="scan-strip" id="scan-strip">
         <span class="scan-key">Last scan</span>
         <span class="scan-val" id="scan-time">—</span>
@@ -400,6 +433,9 @@
     <div class="filter-bar" id="filter-bar">
         <button class="filter-pill active" data-filter="all" onclick="setFilter('all',this)">All</button>
         <button class="filter-pill" data-filter="hot" onclick="setFilter('hot',this)">🔥 Hot 75%+</button>
+        <button class="filter-pill" data-filter="GIMBA" onclick="setFilter('GIMBA',this)">🌀 GIMBA (S3+S10)</button>
+        <button class="filter-pill" data-filter="S1" onclick="setFilter('S1',this)">🎯 S1</button>
+        <button class="filter-pill" data-filter="S10" onclick="setFilter('S10',this)">📊 S10</button>
         <button class="filter-pill" data-filter="CONFIRM" onclick="setFilter('CONFIRM',this)">✅ Confirm</button>
         <button class="filter-pill" data-filter="PENDING" onclick="setFilter('PENDING',this)">⏳ Pending</button>
         <button class="filter-pill" data-filter="WAIT" onclick="setFilter('WAIT',this)">👁 Wait</button>
@@ -432,6 +468,9 @@
 const API = 'https://giving-wisdom-production-9b27.up.railway.app/api/signals';
 const REFRESH_SEC = 60;
 let allSignals = [];
+let s1Signals  = [];
+let s10Signals = [];
+let gimbaSignals = [];
 let currentFilter = 'all';
 let countdownVal = REFRESH_SEC;
 let refreshTimer;
@@ -509,6 +548,9 @@ function setFilter(f, btn) {
 function applyFilter(sigs) {
     if (currentFilter === 'all') return sigs;
     if (currentFilter === 'hot') return sigs.filter((s) => conv(s) >= 75);
+    if (currentFilter === 'GIMBA') return gimbaSignals;
+    if (currentFilter === 'S1')   return s1Signals;
+    if (currentFilter === 'S10')  return s10Signals;
     if (['CONFIRM', 'PENDING', 'WAIT', 'REJECT', 'EXPIRED'].includes(currentFilter)) {
         return sigs.filter((s) => (s.december_verdict || 'PENDING').toUpperCase() === currentFilter);
     }
@@ -539,6 +581,11 @@ function renderCard(sig) {
     const april = sig.april_view ?? sig.april ?? null;
     const ts = sig.fired_at ?? sig.timestamp ?? null;
 
+    const engineUp = (engine || '').toUpperCase();
+    const categoryTag = ['S1','S3','S10'].includes(engineUp)
+        ? `<span class="category-tag ${engineUp}">${engineUp === 'S3' ? 'GIMBA' : engineUp}</span>`
+        : '';
+
     const metaCells = [];
     metaCells.push(`<div class="meta-cell"><div class="meta-key">Bias</div><div class="meta-val ${biasClass(bias)}">${bias || '—'}</div></div>`);
     metaCells.push(`<div class="meta-cell"><div class="meta-key">Engine</div><div class="meta-val">${engine || '—'}</div></div>`);
@@ -549,7 +596,7 @@ function renderCard(sig) {
 
     return `<div class="signal-card ${cardClass} ${expired ? 'expired' : ''}">
         <div class="card-head">
-            <div class="pair-name">${sig.pair || '?'}</div>
+            <div class="pair-name">${sig.pair || '?'}${categoryTag}</div>
             <div class="verdict-badge ${verdict}">${verdict}</div>
         </div>
         <div class="conv-row">
@@ -569,6 +616,9 @@ function renderSignals(sigs) {
     document.getElementById('cnt-total').textContent = sigs.length;
     document.getElementById('cnt-hot').textContent = sigs.filter((s) => conv(s) >= 75).length;
     document.getElementById('cnt-confirm').textContent = sigs.filter((s) => (s.december_verdict || '').toUpperCase() === 'CONFIRM').length;
+    document.getElementById('cnt-gimba').textContent = gimbaSignals.length;
+    document.getElementById('cnt-s1').textContent   = s1Signals.length;
+    document.getElementById('cnt-s10').textContent  = s10Signals.length;
 
     if (filtered.length === 0) {
         container.innerHTML = `<div class="empty-state"><div class="empty-icon">📡</div><div class="empty-title">No signals${currentFilter !== 'all' ? ' for this filter' : ''}</div><div class="empty-body">No live signals matched the current view.</div></div>`;
@@ -623,7 +673,10 @@ async function loadSignals(manual = false) {
         const data = await res.json();
 
         const sigs = data.signals ?? data ?? [];
-        allSignals = Array.isArray(sigs) ? sigs : [];
+        allSignals   = Array.isArray(sigs) ? sigs : [];
+        s1Signals    = Array.isArray(data.s1_signals)    ? data.s1_signals    : allSignals.filter((s) => (s.engine || '').toUpperCase() === 'S1');
+        s10Signals   = Array.isArray(data.s10_signals)   ? data.s10_signals   : allSignals.filter((s) => (s.engine || '').toUpperCase() === 'S10');
+        gimbaSignals = Array.isArray(data.gimba_signals) ? data.gimba_signals : allSignals.filter((s) => ['S3','S10'].includes((s.engine || '').toUpperCase()));
 
         const lastscan = data.lastscan ?? data.last_scan ?? (data.tak && data.tak.lastscan);
         const regime = data.regime ?? (data.tak && data.tak.regime);

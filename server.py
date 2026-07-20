@@ -248,6 +248,32 @@ def load_signal_bus():
             "mode": "FULL_AGGRESSION",
         })
     data["accounts"] = accounts
+
+    # ── Classify signals into explicit engine categories ──────────────────────
+    # Engines with "Gimba" branding: S3 (Gimba Volatile) + S10 (Gimba Range)
+    _GIMBA_ENGINES = {"S3", "S10"}
+    all_signals = data.get("signals", []) or []
+
+    s1_signals  = [s for s in all_signals if str(s.get("engine", "")).upper() == "S1"]
+    s10_signals = [s for s in all_signals if str(s.get("engine", "")).upper() == "S10"]
+
+    # GIMBA = signals from Gimba-branded engines + any pre-existing gimba_signals bucket
+    gimba_from_signals = [s for s in all_signals if str(s.get("engine", "")).upper() in _GIMBA_ENGINES]
+    existing_gimba = data.get("gimba_signals", []) or []
+    # Deduplicate by (pair, engine, fired_at) so pre-existing entries don't double-count
+    seen: set = set()
+    gimba_signals: list = []
+    for _s in existing_gimba + gimba_from_signals:
+        _key = (_s.get("pair"), _s.get("engine"), _s.get("fired_at"))
+        if _key not in seen:
+            seen.add(_key)
+            gimba_signals.append(_s)
+
+    data["s1_signals"]    = s1_signals
+    data["s10_signals"]   = s10_signals
+    data["gimba_signals"] = gimba_signals
+    # ─────────────────────────────────────────────────────────────────────────
+
     return data
 
 
