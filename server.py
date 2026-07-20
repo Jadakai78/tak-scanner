@@ -233,6 +233,38 @@ def load_signal_bus():
         pass
     # -------------------------------------------------------------------------
 
+    # ── Normalize top-level fields the frontend reads ────────────────────────
+
+    # last_scan: surface the first non-empty value from any key the scanner
+    # may have written it under, at the canonical root key.
+    if not data.get("last_scan"):
+        data["last_scan"] = (
+            data.get("lastscan")
+            or data.get("last_scan")
+            or (data.get("tak") or {}).get("lastscan")
+        )
+
+    # active_pairs: live count of signal cards the UI should show as actionable.
+    # Always recount from the array — never trust a cached scalar, because the
+    # aging daemon expires signals between scan cycles and any stored number
+    # goes stale immediately.
+    data["active_pairs"] = sum(
+        1 for s in data.get("signals", [])
+        if s.get("december_verdict", "PENDING") == "PENDING"
+    )
+
+    # market_active_pairs: scanner universe count — how many pairs were active
+    # across the full market scan, independent of whether signals fired.
+    # Preserved separately so the UI can show "X of Y pairs firing" context.
+    if not data.get("market_active_pairs"):
+        data["market_active_pairs"] = (
+            data.get("activepairs")
+            or (data.get("oracle") or {}).get("activepairs")
+            or 0
+        )
+
+    # ─────────────────────────────────────────────────────────────────────────
+
     # Inject account data
     baselines = data.get("session_baselines", {})
     accounts = []
