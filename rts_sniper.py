@@ -435,7 +435,6 @@ if __name__ == "__main__":
         f"{result.get('rts_s_grade', 0)} S-grade | "
         f"{result.get('rts_duration_sec', 0)}s"
     )
-        
         # ── write own bus lane ────────────────────────────────────────────────
         self._write_bus(signals, fg, now, duration)
 
