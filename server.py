@@ -261,12 +261,12 @@ def load_signal_bus():
     gimba_from_signals = [s for s in all_signals if str(s.get("engine", "")).upper() in _GIMBA_ENGINES]
     existing_gimba = data.get("gimba_signals", []) or []
     # Deduplicate by (pair, engine, fired_at) so pre-existing entries don't double-count
-    _seen: set = set()
+    seen: set = set()
     gimba_signals: list = []
     for _s in existing_gimba + gimba_from_signals:
         _key = (_s.get("pair"), _s.get("engine"), _s.get("fired_at"))
-        if _key not in _seen:
-            _seen.add(_key)
+        if _key not in seen:
+            seen.add(_key)
             gimba_signals.append(_s)
 
     data["s1_signals"]    = s1_signals
