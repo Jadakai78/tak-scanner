@@ -81,9 +81,7 @@ def push_to_cf():
     except Exception as e:
         logger.error("CF KV push failed: %s", e)
 
-
-def run_scan():
-    if not SCANNER.exists():
+                     if not SCANNER.exists():
         logger.error("Scanner not found: %s", SCANNER)
         return
     try:
