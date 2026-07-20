@@ -212,6 +212,7 @@ class PairUniverse:
             #     return None
             # if atr_pct < self.min_atr_pct:
             #     return None
+            pass
 
         return {
             "pair": candidate["base"],
