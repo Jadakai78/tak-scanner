@@ -1,0 +1,160 @@
+index.html  <!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TAK Scanner - Live Signals</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            background: #0a0e27;
+            color: #e0e0e0;
+            padding: 10px;
+        }
+        .header {
+            text-align: center;
+            padding: 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border-radius: 10px;
+            margin-bottom: 20px;
+        }
+        .header h1 { font-size: 1.5em; margin-bottom: 5px; }
+        .status { 
+            display: inline-block;
+            padding: 5px 15px;
+            background: #10b981;
+            border-radius: 20px;
+            font-size: 0.8em;
+            margin-top: 10px;
+        }
+        .signal-card {
+            background: #1a1f3a;
+            border-radius: 10px;
+            padding: 15px;
+            margin-bottom: 15px;
+            border-left: 4px solid #667eea;
+        }
+        .signal-card.hot { border-left-color: #ef4444; }
+        .pair { 
+            font-size: 1.2em;
+            font-weight: bold;
+            color: #667eea;
+            margin-bottom: 5px;
+        }
+        .conviction {
+            display: inline-block;
+            padding: 3px 10px;
+            background: #10b981;
+            border-radius: 5px;
+            font-size: 0.85em;
+            margin: 5px 0;
+        }
+        .strategy { 
+            color: #9ca3af;
+            font-size: 0.9em;
+            margin: 5px 0;
+        }
+        .timestamp {
+            color: #6b7280;
+            font-size: 0.75em;
+            margin-top: 10px;
+        }
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: #9ca3af;
+        }
+        .error {
+            background: #fee2e2;
+            color: #991b1b;
+            padding: 15px;
+            border-radius: 10px;
+            margin: 20px 0;
+        }
+        .refresh-btn {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            background: #667eea;
+            color: white;
+            border: none;
+            padding: 15px;
+            border-radius: 50%;
+            font-size: 1.2em;
+            cursor: pointer;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>🎯 TAK Scanner</h1>
+        <div class="status" id="status">Connecting...</div>
+    </div>
+    
+    <div id="signals" class="loading">Loading signals...</div>
+    
+    <button class="refresh-btn" onclick="loadSignals()">↻</button>
+
+    <script>
+        const CF_WORKER_URL = 'https://api.cloudflare.com/client/v4/accounts/ea17be7c9b13c5f9c1fec378a44e9e39/storage/kv/namespaces/e93558412bde4922828325e714bc44d8/values/signal_bus';
+        const CF_API_TOKEN = 'cfut_m1CVH1n2JWOJb4KUU22d51aJVu8QK8khVM9opHeq2fB3cef8';
+
+        async function loadSignals() {
+            const signalsDiv = document.getElementById('signals');
+            const statusDiv = document.getElementById('status');
+            
+            try {
+                statusDiv.textContent = 'Loading...';
+                statusDiv.style.background = '#f59e0b';
+                
+                const response = await fetch(CF_WORKER_URL, {
+                    headers: {
+                        'Authorization': `Bearer ${CF_API_TOKEN}`
+                    }
+                });
+                
+                if (!response.ok) throw new Error('Failed to fetch signals');
+                
+                const data = await response.json();
+                
+                if (!data || data.length === 0) {
+                    signalsDiv.innerHTML = '<div class="error">No signals available. Scanner may be offline.</div>';
+                    statusDiv.textContent = 'No Signals';
+                    statusDiv.style.background = '#ef4444';
+                    return;
+                }
+                
+                // Sort by conviction (highest first)
+                const signals = data.sort((a, b) => (b.conviction || 0) - (a.conviction || 0));
+                
+                signalsDiv.innerHTML = signals.map(signal => `
+                    <div class="signal-card ${signal.conviction >= 0.75 ? 'hot' : ''}">
+                        <div class="pair">${signal.pair || 'Unknown'}</div>
+                        <div class="conviction">💪 ${((signal.conviction || 0) * 100).toFixed(0)}% Conviction</div>
+                        <div class="strategy">📊 ${signal.strategy || 'N/A'}</div>
+                        <div class="strategy">💰 Entry: ${signal.entry_price || 'N/A'}</div>
+                        <div class="timestamp">⏰ ${new Date(signal.timestamp * 1000).toLocaleString()}</div>
+                    </div>
+                `).join('');
+                
+                statusDiv.textContent = `✅ Live (${signals.length} signals)`;
+                statusDiv.style.background = '#10b981';
+                
+            } catch (error) {
+                console.error('Error loading signals:', error);
+                signalsDiv.innerHTML = `<div class="error">❌ Error: ${error.message}<br><br>Check your connection and try again.</div>`;
+                statusDiv.textContent = '❌ Error';
+                statusDiv.style.background = '#ef4444';
+            }
+        }
+
+        // Load signals on page load
+        loadSignals();
+        
+        // Auto-refresh every 60 seconds
+        setInterval(loadSignals, 60000);
+    </script>
+</body>
+</html>
