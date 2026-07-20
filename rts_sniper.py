@@ -655,7 +655,7 @@ class RTSSniper:
 
 if __name__ == "__main__":
     sniper = RTSSniper(max_pairs=None)
-    result = sniper.run_scan()
+    sniper.run()
     print(
         f"RTS Sniper complete: {result.get('rts_signals_fired', 0)} signals | "
         f"{result.get('rts_s_grade', 0)} S-grade | "
