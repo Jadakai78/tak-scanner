@@ -1,4 +1,4 @@
-index.html  <!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
@@ -98,8 +98,7 @@ index.html  <!DOCTYPE html>
     <button class="refresh-btn" onclick="loadSignals()">↻</button>
 
     <script>
-        const CF_WORKER_URL = 'https://api.cloudflare.com/client/v4/accounts/ea17be7c9b13c5f9c1fec378a44e9e39/storage/kv/namespaces/e93558412bde4922828325e714bc44d8/values/signal_bus';
-        const CF_API_TOKEN = 'cfut_m1CVH1n2JWOJb4KUU22d51aJVu8QK8khVM9opHeq2fB3cef8';
+        const RAILWAY_URL = 'https://giving-wisdom-production-9b27.up.railway.app/api/signals';
 
         async function loadSignals() {
             const signalsDiv = document.getElementById('signals');
@@ -109,11 +108,7 @@ index.html  <!DOCTYPE html>
                 statusDiv.textContent = 'Loading...';
                 statusDiv.style.background = '#f59e0b';
                 
-                const response = await fetch(CF_WORKER_URL, {
-                    headers: {
-                        'Authorization': `Bearer ${CF_API_TOKEN}`
-                    }
-                });
+                const response = await fetch(RAILWAY_URL);
                 
                 if (!response.ok) throw new Error('Failed to fetch signals');
                 
