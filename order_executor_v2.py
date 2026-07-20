@@ -29,7 +29,7 @@ PAIR_MAP: Dict[str, str] = {
     "XRP": "XRPUSD", "AVAX": "AVAXUSD", "LINK": "LINKUSD", "DOT": "DOTUSD", "MATIC": "MATICUSD",
     "AAVE": "AAVEUSD", "LTC": "LTCUSD", "DOGE": "DOGEUSD", "ATOM": "ATOMUSD", "UNI": "UNIUSD",
     "ARB": "ARBUSD", "OP": "OPUSD", "INJ": "INJUSD", "SUI": "SUIUSD", "APT": "APTUSD",
-    "BNB": "BNBUSD", "ONDO": "ONDOUSD", "HYPE": "HYPEUSD", "TAO": "TAOUSD",
+    "BNB": "BNBUSD", "ONDO": "ONDOUSD", "HYPE": "HYPEUSD", "TAO": "TAOUSD", "TON": "TONUSD",
 }
 
 PROP_SEATS: Dict[str, Dict[str, Any]] = {
@@ -41,6 +41,19 @@ PROP_SEATS: Dict[str, Dict[str, Any]] = {
 LADDER_TP_NORMAL: List[float] = [1.0, 1.5, 2.0, 2.5]
 LADDER_TP_SPRINT: List[float] = [0.8, 1.3, 1.8, 2.2]
 LADDER_TP_FRACTIONS: List[float] = [0.25, 0.25, 0.25, 0.25]
+
+QUOTE_SUFFIXES = ("USDT", "USD", "USDC", "PERP")
+
+
+def normalize_pair_base(raw_pair: Any) -> str:
+    p = str(raw_pair or "").upper().replace("-", "").replace("/", "").strip()
+    for q in QUOTE_SUFFIXES:
+        if p.endswith(q) and len(p) > len(q):
+            p = p[: -len(q)]
+            break
+    if p == "BTC":
+        p = "XBT"
+    return p
 
 
 class OrderExecutor:
@@ -120,10 +133,12 @@ class OrderExecutor:
             self.daily_loss += float(amount)
 
     def place_order(self, signal: Dict[str, Any]) -> Dict[str, Any]:
-        pair_base = str(signal.get("pair", "")).upper()
+        raw_pair = str(signal.get("pair", "")).upper()
+        pair_base = normalize_pair_base(raw_pair)
         kraken_pair = PAIR_MAP.get(pair_base)
         if kraken_pair is None:
-            return {"status": "SKIPPED", "reason": "UNMAPPED_PAIR", "pair": pair_base}
+            logger.info("SKIP %s -> %s reason=UNMAPPED_PAIR", raw_pair, pair_base)
+            return {"status": "SKIPPED", "reason": "UNMAPPED_PAIR", "pair": raw_pair, "pair_base": pair_base}
         bias = str(signal.get("bias", "")).upper()
         order_type = "buy" if bias == "LONG" else "sell"
         entry = float(signal["entry"])
@@ -131,7 +146,8 @@ class OrderExecutor:
         tp = float(signal.get("tp", 0) or 0)
         volume = self.position_size_with_sammy(signal)
         if volume <= 0:
-            return {"status": "SKIPPED", "reason": "ZERO_VOLUME", "pair": pair_base}
+            logger.info("SKIP %s reason=ZERO_VOLUME entry=%s sl=%s", raw_pair, signal.get("entry"), signal.get("sl"))
+            return {"status": "SKIPPED", "reason": "ZERO_VOLUME", "pair": raw_pair}
         payload: Dict[str, Any] = {
             "pair": kraken_pair,
             "type": order_type,
@@ -147,14 +163,14 @@ class OrderExecutor:
             payload["takeprofit"] = self.fmt(tp)
         if self.dryrun:
             logger.info("DRYRUN would AddOrder %s", json.dumps(payload))
-            return {"status": "SIMULATED", "dryrun": True, "pair": pair_base, "kraken_pair": kraken_pair, "volume": volume, "payload": payload}
+            return {"status": "SIMULATED", "dryrun": True, "pair": raw_pair, "pair_base": pair_base, "kraken_pair": kraken_pair, "volume": volume, "payload": payload}
         try:
             resp = self.private_request(ADD_ORDER_PATH, payload)
         except Exception as exc:
-            return {"status": "ERROR", "dryrun": False, "pair": pair_base, "error": str(exc)}
+            return {"status": "ERROR", "dryrun": False, "pair": raw_pair, "pair_base": pair_base, "error": str(exc)}
         if resp.get("error"):
-            return {"status": "ERROR", "dryrun": False, "pair": pair_base, "error": resp["error"]}
-        return {"status": "PLACED", "dryrun": False, "pair": pair_base, "kraken_pair": kraken_pair, "volume": volume, "result": resp.get("result"), "payload": payload}
+            return {"status": "ERROR", "dryrun": False, "pair": raw_pair, "pair_base": pair_base, "error": resp["error"]}
+        return {"status": "PLACED", "dryrun": False, "pair": raw_pair, "pair_base": pair_base, "kraken_pair": kraken_pair, "volume": volume, "result": resp.get("result"), "payload": payload}
 
     def get_open_positions(self) -> List[Dict[str, Any]]:
         if self.dryrun:
@@ -236,7 +252,7 @@ class OrderExecutor:
 
     @staticmethod
     def save_bus(buspath: Path, bus: Dict[str, Any]) -> None:
-        tmp_path = buspath.with_suffix('.tmp.json')
+        tmp_path = buspath.with_suffix(".tmp.json")
         tmp_path.write_text(json.dumps(bus, indent=2, default=str))
         tmp_path.replace(buspath)
 
