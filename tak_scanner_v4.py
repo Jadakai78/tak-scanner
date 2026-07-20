@@ -46,7 +46,6 @@ INTENT_RANK = {
     "STARTER_DELTA": 6,
 }
 MAX_SAMMY_ALERTS = 5
-MAX_DISPLAY_SIGNALS = 2
 SIGNAL_TTL_HOURS = 48
 
 
@@ -300,8 +299,8 @@ class TakScannerV4:
         # Sort signals by intent rank
         signals.sort(key=lambda s: INTENT_RANK.get(s.get("intent", ""), 999))
 
-        # Cap emitted/displayed signals to reduce feed clutter while preserving best order
-        signals = signals[:MAX_DISPLAY_SIGNALS]
+        # Show all pairs meeting conviction threshold (>= 0.70)
+        signals = [s for s in signals if float(s.get("conviction", s.get("score", 0.0)) or 0.0) >= 0.70]
         stats["signaled"] = len(signals)
         
         # Check for quiet hours and sprint mode
