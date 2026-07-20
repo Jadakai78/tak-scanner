@@ -4,7 +4,18 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, Iterable, List, Optional
 from datetime import datetime, timezone
 import math
-
+PROP_WHITELIST = {
+    "symbol",
+    "base",
+    "quote",
+    "timeframe",
+    "exchange",
+    "last_price",
+    "is_tradeable",
+    "market_active",
+    "data_fresh",
+    "metadata",
+}
 
 @dataclass
 class PairContext:
