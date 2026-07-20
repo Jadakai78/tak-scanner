@@ -18,6 +18,9 @@ from remi import Remi
 from signalbus import SignalBus
 from strategies import ENGINE_CLASSES, REGIME_ENGINES, S8MTFConfluence, score_delta_context
 from gimba_formatter import format_gimba_message
+from scannermodels import PairContext, CandidateSignal
+from scannerorchestrator import ScannerOrchestrator
+from scannerspecialist_registry import SpecialistRegistry
 
 # Configuration
 SEATS = [
@@ -111,6 +114,11 @@ class TakScannerV4:
         # April integration scaffold
         self.april_enabled = False
         self.april_status = {"ready": False, "last_check": None}
+
+            # V4 Architecture: Orchestrator + Specialist Registry
+        registry = SpecialistRegistry()
+        registry = registry.from_engine_map(ENGINE_CLASSES, REGIME_ENGINES)
+        self.orchestrator = ScannerOrchestrator(specialist_registry=registry)
 
     def next_scan_time(self, now: datetime) -> datetime:
         candidates = []
