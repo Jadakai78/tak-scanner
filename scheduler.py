@@ -31,12 +31,39 @@ SIGNAL_BUS.parent.mkdir(parents=True, exist_ok=True)
 
 
 def push_to_cf():
-    """Write signal_bus.json directly to CF KV via REST API."""
-    if not SIGNAL_BUS.exists():
-        logger.warning("push_to_cf: signal_bus.json not found — skipping")
+    """Write signal_bus.json directly to CF KV via REST API.
+
+    Robust lookup order (first existing path wins):
+      1. /app/data/signal_bus.json
+      2. MODULE_DIR / "signal_bus.json"
+      3. MODULE_DIR / "signalbus.json"
+    """
+    candidates = [
+        Path("/app/data/signal_bus.json"),
+        MODULE_DIR / "signal_bus.json",
+        MODULE_DIR / "signalbus.json",
+    ]
+
+    bus_path = None
+    for p in candidates:
+        try:
+            if p.exists():
+                bus_path = p
+                break
+        except Exception:
+            # If there's a permission or FS error, continue to next candidate
+            continue
+
+    if not bus_path:
+        logger.warning(
+            "push_to_cf: no signal bus file found in canonical locations (%s) — skipping",
+            ", ".join(str(x) for x in candidates),
+        )
         return
+
+    logger.info("push_to_cf: using signal bus file: %s", bus_path)
     try:
-        payload = SIGNAL_BUS.read_bytes()
+        payload = bus_path.read_bytes()
         req = urllib.request.Request(
             CF_KV_URL,
             data=payload,
