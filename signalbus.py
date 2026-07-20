@@ -32,6 +32,7 @@ _EMPTY_BUS: Dict[str, Any] = {
     "activepairs": 0,
     "deadpairs": 0,
     "signals": [],
+    "rts_signals": [],
     "killedsignals": [],
     "openpositions": [],
     "regimemap": {},
@@ -81,42 +82,65 @@ class SignalBus:
         self._atomic_write(bus)
 
     def expire_old_signals(self, max_age_hours: int = DEFAULT_MAX_AGE_HOURS) -> int:
+        """
+        Expire stale signals in BOTH legacy and RTS lanes:
+        - legacy lane: signals
+        - RTS lane: rts_signals
+
+        Supports both timestamp styles:
+        - expiresat / firedat
+        - expires_at / fired_at
+        """
         bus = self.read()
         now = datetime.now(timezone.utc)
         cutoff = now - timedelta(hours=max_age_hours)
 
-        kept = []
-        removed = 0
+        removed_total = 0
 
-        for sig in bus.get("signals", []):
-            if self._still_fresh(sig, now, cutoff):
-                kept.append(sig)
-            else:
-                removed += 1
+        for lane in ("signals", "rts_signals"):
+            original = bus.get(lane, [])
+            if not isinstance(original, list):
+                continue
 
-        if removed:
-            bus["signals"] = kept
+            kept = []
+            removed = 0
+            for sig in original:
+                if isinstance(sig, dict) and self._still_fresh(sig, now, cutoff):
+                    kept.append(sig)
+                else:
+                    removed += 1
+
+            if removed:
+                bus[lane] = kept
+                removed_total += removed
+                logger.info("Expired %d stale signals from lane '%s'.", removed, lane)
+
+        if removed_total:
             self._atomic_write(bus)
-            logger.info("Expired %d stale signals.", removed)
 
-        return removed
+        return removed_total
 
     @staticmethod
-    def _still_fresh(sig: Dict[str, Any], now: datetime, cutoff: datetime) -> bool:
-        exp = sig.get("expiresat")
-        if exp:
-            try:
-                return datetime.fromisoformat(str(exp).replace("Z", "+00:00")) > now
-            except ValueError:
-                pass
+    def _parse_iso(value: Any) -> Optional[datetime]:
+        if not value:
+            return None
+        try:
+            return datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        except ValueError:
+            return None
 
-        fired = sig.get("firedat")
-        if fired:
-            try:
-                return datetime.fromisoformat(str(fired).replace("Z", "+00:00")) > cutoff
-            except ValueError:
-                pass
+    def _still_fresh(self, sig: Dict[str, Any], now: datetime, cutoff: datetime) -> bool:
+        # Prefer explicit expires timestamp if present
+        exp = self._parse_iso(sig.get("expiresat")) or self._parse_iso(sig.get("expires_at"))
+        if exp is not None:
+            return exp > now
 
+        # Fallback to fired timestamp age check
+        fired = self._parse_iso(sig.get("firedat")) or self._parse_iso(sig.get("fired_at"))
+        if fired is not None:
+            return fired > cutoff
+
+        # No timestamps => keep (defensive default)
         return True
 
     def _atomic_write(self, bus: Dict[str, Any]) -> None:
@@ -137,9 +161,8 @@ class SignalBus:
 
             # After successful replace, collect mtime and write a debug helper file
             try:
-                mtime = None
                 try:
-                    mtime = datetime.utcfromtimestamp(self.path.stat().st_mtime).isoformat() + 'Z'
+                    mtime = datetime.utcfromtimestamp(self.path.stat().st_mtime).isoformat() + "Z"
                 except Exception:
                     mtime = None
                 debug = {
@@ -147,6 +170,7 @@ class SignalBus:
                     "written_at": datetime.now(timezone.utc).isoformat(),
                     "file_mtime": mtime,
                     "signals_count": len(bus.get("signals", [])),
+                    "rts_signals_count": len(bus.get("rts_signals", [])),
                     "killed_count": len(bus.get("killedsignals", [])),
                 }
                 dbgpath = self.path.parent / "signal_bus.write_debug.json"
@@ -158,8 +182,9 @@ class SignalBus:
                 pass
 
             logger.info(
-                "Signal bus written: %d signals, %d killed. path=%s",
+                "Signal bus written: legacy=%d rts=%d killed=%d path=%s",
                 len(bus.get("signals", [])),
+                len(bus.get("rts_signals", [])),
                 len(bus.get("killedsignals", [])),
                 str(self.path),
             )
