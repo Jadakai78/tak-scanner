@@ -94,7 +94,8 @@ def write_bus_snapshot(payload: Dict[str, Any], output_path: Path) -> None:
     Writes the bus payload snapshot to disk as JSON.
     """
     try:
-        with open(output_path, "w", encoding="utf-8") as f:
+        # Use Path.open for consistency
+        with output_path.open("w", encoding="utf-8") as f:
             json.dump(payload, f, indent=2, ensure_ascii=False)
         logger.info(f"Bus snapshot written to {output_path}")
     except Exception as e:
@@ -115,9 +116,19 @@ class TakScannerV4:
         self.april_enabled = False
         self.april_status = {"ready": False, "last_check": None}
 
-            # V4 Architecture: Orchestrator + Specialist Registry
-        registry = SpecialistRegistry()
-        registry = registry.from_engine_map(ENGINE_CLASSES, REGIME_ENGINES)
+        # V4 Architecture: Orchestrator + Specialist Registry
+        try:
+            # Prefer a classmethod if the API provides it
+            registry = SpecialistRegistry.from_engine_map(ENGINE_CLASSES, REGIME_ENGINES)
+        except Exception:
+            # Fallback to instance method if available
+            registry = SpecialistRegistry()
+            try:
+                registry = registry.from_engine_map(ENGINE_CLASSES, REGIME_ENGINES)
+            except Exception as e:
+                logger.exception(f"Failed to build SpecialistRegistry from engine map: {e}")
+                registry = SpecialistRegistry()
+
         self.orchestrator = ScannerOrchestrator(specialist_registry=registry)
 
     def next_scan_time(self, now: datetime) -> datetime:
@@ -157,7 +168,15 @@ class TakScannerV4:
                 regime_map[pair] = regime
                 
                 aist = AISupertrend(pair)
-                engine_class = REGIME_ENGINES.get(regime, ENGINE_CLASSES[0])
+                # choose engine class robustly
+                engine_class = REGIME_ENGINES.get(regime)
+                if engine_class is None:
+                    if isinstance(ENGINE_CLASSES, (list, tuple)):
+                        engine_class = ENGINE_CLASSES[0]
+                    elif isinstance(ENGINE_CLASSES, dict):
+                        engine_class = next(iter(ENGINE_CLASSES.values()))
+                    else:
+                        raise TypeError("Unexpected ENGINE_CLASSES type")
                 engine = engine_class()
                 
                 # Fetch OHLC data for specialist strategies
@@ -173,13 +192,25 @@ class TakScannerV4:
                     
                     # MTF confluence check
                     mtf = S8MTFConfluence()
-                    mtf_result = mtf.check_alignment(pair)
+                    try:
+                        mtf_result = mtf.check_alignment(pair)
+                    except Exception as e:
+                        logger.debug(f"MTF check failed for {pair}: {e}")
+                        mtf_result = None
                     if mtf_result:
                         enriched.update(mtf_result)
                     
                     # Score conviction
-                    score = self.scorer.score(enriched)
+                    try:
+                        score = self.scorer.score(enriched)
+                    except Exception as e:
+                        logger.debug(f"Scoring failed for {pair}: {e}")
+                        score = 0
                     enriched["conviction"] = score
+
+                    # attach timestamp for TTL tracking
+                    signal_time = datetime.now(timezone.utc).isoformat()
+                    enriched["timestamp"] = signal_time
                     
                     # Determine action state
                     action_state = self._resolve_action_state(enriched, pair)
@@ -191,9 +222,35 @@ class TakScannerV4:
                     else:
                         signals.append(enriched)
                         stats["signaled"] += 1
+                        # record for TTL tracking (keep a minimal record)
+                        try:
+                            self.last_signals.append({"pair": pair, "timestamp": signal_time})
+                        except Exception:
+                            logger.debug("Failed to append to last_signals")
                         
             except Exception as e:
-                logger.error(f"Error scanning {pair}: {e}")
+                logger.exception(f"Error scanning {pair}: {e}")
+        
+        # trim last_signals to avoid unbounded growth
+        try:
+            cutoff = datetime.now(timezone.utc) - timedelta(hours=SIGNAL_TTL_HOURS)
+            trimmed = []
+            for s in self.last_signals:
+                ts = s.get("timestamp")
+                if not ts:
+                    continue
+                try:
+                    t = datetime.fromisoformat(ts)
+                    if t.tzinfo is None:
+                        t = t.replace(tzinfo=timezone.utc)
+                    if t >= cutoff:
+                        trimmed.append(s)
+                except Exception:
+                    # if parsing fails, drop the entry
+                    continue
+            self.last_signals = trimmed
+        except Exception:
+            logger.debug("Failed to trim last_signals")
         
         # Sort signals by intent rank
         signals.sort(key=lambda s: INTENT_RANK.get(s.get("intent", ""), 999))
@@ -219,19 +276,22 @@ class TakScannerV4:
         )
         
         # Update bus (legacy interface)
-        self.bus.update(
-            lastscan=now.isoformat(),
-            nextscan=self.next_scan_time(now).isoformat(),
-            fg=fg,
-            activepairs=len(active),
-            deadpairs=dead_count,
-            signals=signals,
-            killedsignals=killed,
-            regimemap=regime_map,
-            sessionstats=stats,
-            quiethours=quiet,
-            sprintmode=sprintmode,
-        )
+        try:
+            self.bus.update(
+                lastscan=now.isoformat(),
+                nextscan=self.next_scan_time(now).isoformat(),
+                fg=fg,
+                activepairs=len(active),
+                deadpairs=dead_count,
+                signals=signals,
+                killedsignals=killed,
+                regimemap=regime_map,
+                sessionstats=stats,
+                quiethours=quiet,
+                sprintmode=sprintmode,
+            )
+        except Exception as e:
+            logger.debug(f"Bus update failed: {e}")
         
         # Write snapshot to disk
         snapshot_path = MODULE_DIR / "signal_bus.json"
@@ -251,14 +311,18 @@ class TakScannerV4:
         for old_signal in self.last_signals:
             if old_signal.get("pair") == pair:
                 timestamp = old_signal.get("timestamp")
-                if timestamp:
-                    try:
-                        signal_time = datetime.fromisoformat(timestamp)
-                        age_hours = (datetime.now(timezone.utc) - signal_time).total_seconds() / 3600
-                        if age_hours > SIGNAL_TTL_HOURS:
-                            return "Killed"
-                    except Exception:
-                        pass
+                if not timestamp:
+                    continue
+                try:
+                    signal_time = datetime.fromisoformat(timestamp)
+                    # Ensure timezone-aware (assume UTC if none specified)
+                    if signal_time.tzinfo is None:
+                        signal_time = signal_time.replace(tzinfo=timezone.utc)
+                    age_hours = (datetime.now(timezone.utc) - signal_time).total_seconds() / 3600
+                    if age_hours > SIGNAL_TTL_HOURS:
+                        return "Killed"
+                except Exception as e:
+                    logger.debug(f"Failed to parse timestamp for TTL check: {timestamp!r}: {e}")
         return "Signal"
 
     def _build_april_view(self) -> Dict[str, Any]:
@@ -284,7 +348,7 @@ class TakScannerV4:
                 # Send via Telegram, Outlook, etc.
                 logger.info(f"Alert fired for {signal.get('pair', 'unknown')}")
             except Exception as e:
-                logger.error(f"Alert failed: {e}")
+                logger.exception(f"Alert failed: {e}")
 
 
 if __name__ == "__main__":
