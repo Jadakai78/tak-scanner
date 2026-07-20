@@ -77,6 +77,22 @@ class Remi:
         rts_outputs: Optional[list] = None,
         current_bar: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
+
+        # 🚨 EMERGENCY TRIAGE: Bypass kills for high-conviction signals
+        conviction = signal.get("conviction", signal.get("score", 0))
+        pair = signal.get("pair", "UNKNOWN")
+
+        if conviction >= 0.75:
+            logger.warning(
+                f"🚨 TRIAGE BYPASS: {pair} conviction={conviction:.2f} "
+                f"- bypassing Remi kill/caution logic"
+            )
+            return {
+                "status": "CLEAN",
+                "reason": None,
+                "caution": False
+            }
+
         now = now or datetime.now(timezone.utc)
         bias = str(signal.get("bias", "")).upper()
         engine = str(signal.get("engine", "")).upper()
