@@ -99,16 +99,6 @@ class Remi:
                 "reason": None,
                 "caution": False
             }
-'''
-if old not in s:
-    raise SystemExit("Expected broken block not found exactly; paste remi.py and I’ll give exact matcher.")
-p.write_text(s.replace(old, new), encoding="utf-8")
-print("Patched remi.py")
-PY
-
-git add remi.py
-git commit -m "Fix Remi triage bypass indentation and conviction normalization"
-git push
                 
         now = now or datetime.now(timezone.utc)
         bias = str(signal.get("bias", "")).upper()
