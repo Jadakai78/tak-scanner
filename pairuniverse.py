@@ -207,10 +207,11 @@ class PairUniverse:
 
         is_prop = candidate["base"] in PROP_WHITELIST
         if not is_prop:
-            if volume_24h < self.min_volume_24h:
-                return None
-            if atr_pct < self.min_atr_pct:
-                return None
+            # FILTER REMOVED: Let specialist strategies decide pair quality
+            # if volume_24h < self.min_volume_24h:                return None
+                        #     return None
+                        # if atr_pct < self.min_atr_pct:
+            #     return None
 
         return {
             "pair": candidate["base"],
