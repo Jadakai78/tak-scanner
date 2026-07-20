@@ -237,12 +237,11 @@ def load_signal_bus():
 
     # last_scan: surface the first non-empty value from any key the scanner
     # may have written it under, at the canonical root key.
-    if not data.get("last_scan"):
-        data["last_scan"] = (
-            data.get("lastscan")
-            or data.get("last_scan")
-            or (data.get("tak") or {}).get("lastscan")
-        )
+    data["last_scan"] = (
+        data.get("lastscan")
+        or data.get("last_scan")
+        or (data.get("tak") or {}).get("lastscan")
+    )
 
     # active_pairs: live count of signal cards the UI should show as actionable.
     # Always recount from the array — never trust a cached scalar, because the
@@ -258,16 +257,14 @@ def load_signal_bus():
     # market_active_pairs: scanner universe count — how many pairs were active
     # across the full market scan, independent of whether signals fired.
     # Preserved separately so the UI can show "X of Y pairs firing" context.
-    if not data.get("market_active_pairs"):
-        data["market_active_pairs"] = (
-            data.get("activepairs")
-            or (data.get("oracle") or {}).get("activepairs")
-            or 0
-        )
+    data["market_active_pairs"] = (
+        data.get("activepairs")
+        or (data.get("oracle") or {}).get("activepairs")
+        or 0
+    )
 
     # ── Deployment fingerprint — TEMPORARY, remove after confirming live ──────
-    data["_server_normalizer"] = "v3-active"
-    # ─────────────────────────────────────────────────────────────────────────
+    data["_server_normalizer"] = "load_signal_bus_v2"
 
     # Inject account data
     baselines = data.get("session_baselines", {})
