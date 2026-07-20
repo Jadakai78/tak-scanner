@@ -94,13 +94,19 @@ class PairUniverse:
         if not symbol:
             return None
 
+        raw_last_price = row.get("last_price")
+        try:
+            last_price = float(raw_last_price) if raw_last_price is not None else None
+        except (TypeError, ValueError):
+            last_price = None
+
         return PairContext(
             symbol=symbol,
             base=str(row.get("base") or "").upper(),
             quote=str(row.get("quote") or "").upper(),
             timeframe=str(row.get("timeframe") or "15m"),
             exchange=str(row.get("exchange") or ""),
-            last_price=row.get("last_price"),
+            last_price=last_price,
             is_tradeable=bool(row.get("is_tradeable", True)),
             market_active=bool(row.get("market_active", True)),
             data_fresh=bool(row.get("data_fresh", True)),
