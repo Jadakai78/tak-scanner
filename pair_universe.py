@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Dict, Iterable, List, Optional
 from datetime import datetime, timezone
+import math
 
 
 @dataclass
@@ -96,9 +97,15 @@ class PairUniverse:
 
         raw_last_price = row.get("last_price")
         try:
-            last_price = float(raw_last_price) if raw_last_price is not None else None
+            parsed_last_price = float(raw_last_price) if raw_last_price is not None else None
         except (TypeError, ValueError):
-            last_price = None
+            parsed_last_price = None
+
+        last_price = (
+            parsed_last_price
+            if parsed_last_price is not None and math.isfinite(parsed_last_price)
+            else None
+        )
 
         return PairContext(
             symbol=symbol,
