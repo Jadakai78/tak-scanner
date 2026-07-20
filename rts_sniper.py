@@ -273,7 +273,8 @@ class RTSSniper:
     """
 
     def __init__(self, max_pairs: Optional[int] = None) -> None:
-        self.universe  = PairUniverse()
+    from pair_universe import PairUniverse, MarketDataSource
+        self.universe = PairUniverse(MarketDataSource())
         self.regime_cl = RegimeClassifier()
         self.bus       = SignalBus()
         self.max_pairs = max_pairs
