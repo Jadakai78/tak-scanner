@@ -212,7 +212,55 @@ class TakScannerV4:
                 stats["killed"] += 1
             else:
                 signals.append(signal_dict)
-                
+        
+        # ==========================================
+        # BUILD ORACLE + COUNCIL DATA FOR DASHBOARD
+        # ==========================================
+        
+        # Oracle data - market context at top of dashboard
+        oracle_data = {
+            "fg": fg,
+            "fg_label": self._fg_label(fg),
+            "btc_regime": regime_map.get("BTC/USD", "UNKNOWN"),
+            "session": self._get_session(now),
+            "activepairs": len(active),
+            "deadpairs": dead_count,
+            "market_phase": self._market_phase(fg, len(signals)),
+            "sgrade_count": sum(1 for s in signals if s.get("grade") == "S"),
+            "agrade_count": sum(1 for s in signals if s.get("grade") == "A")
+        }
+        
+        # Council data - grouped bot claims for hunting panel
+        council_data = self._build_council_data(candidates)
+        
+        # April data - position health (mock for now, real when positions exist)
+        april_data = {
+            "open_positions": 0,
+            "total_pnl": 0.0,
+            "at_risk": 0.0,
+            "warnings": []
+        }
+        
+        # Remi data - recent kills for visibility
+        remi_data = {
+            "recent_kills": [
+                {
+                    "pair": k["pair"],
+                    "reason": self._kill_reason(k),
+                    "timestamp": now.isoformat()
+                }
+                for k in killed[-10:]  # Last 10 kills
+            ]
+        }
+        
+        # Tak status - system health
+        tak_data = {
+            "lastscan": now.isoformat(),
+            "nextscan": self.next_scan_time(now).isoformat(),
+            "bus_ok": True,
+            "cf_workers_ok": True,
+            "scheduler_ok": True
+        }
         
         # trim last_signals to avoid unbounded growth
         try:
