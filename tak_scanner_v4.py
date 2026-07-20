@@ -218,6 +218,10 @@ class TakScannerV4:
                 "conviction": candidate.score,
                 "timestamp": now.isoformat(),
             }
+            if hasattr(candidate, "grade"):
+                signal_dict["grade"] = candidate.grade
+            if hasattr(candidate, "intent"):
+                signal_dict["intent"] = candidate.intent
             
             # Route based on council decision
             if candidate.council and candidate.council.route == "killed_signals":
@@ -327,25 +331,6 @@ class TakScannerV4:
             tak=tak_data,
             april_view=self._build_april_view() if self.april_enabled else None
         )
-        
-        # Update bus (legacy interface)
-        try:
-            self.bus.update(
-                lastscan=now.isoformat(),
-                nextscan=self.next_scan_time(now).isoformat(),
-                fg=fg,
-                activepairs=len(active),
-                deadpairs=dead_count,
-                signals=signals,
-                killedsignals=killed,
-                regimemap=regime_map,
-                sessionstats=stats,
-                quiethours=quiet,
-                sprintmode=sprintmode,
-                april_view=self._build_april_view() if self.april_enabled else None,
-            )
-        except Exception as e:
-            logger.debug(f"Bus update_failed: {e}")
         
         # Write snapshot to disk
         snapshot_path = self.bus.path
