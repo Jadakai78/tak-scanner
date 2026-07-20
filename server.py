@@ -248,8 +248,10 @@ def load_signal_bus():
     # Always recount from the array — never trust a cached scalar, because the
     # aging daemon expires signals between scan cycles and any stored number
     # goes stale immediately.
+    # `or []` guards against signals being explicitly set to null in the JSON.
+    signals = data.get("signals") or []
     data["active_pairs"] = sum(
-        1 for s in data.get("signals", [])
+        1 for s in signals
         if s.get("december_verdict", "PENDING") == "PENDING"
     )
 
