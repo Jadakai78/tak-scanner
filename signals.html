@@ -504,6 +504,16 @@ function fmtTrap(v) {
     return (n * 100).toFixed(0) + '%';
 }
 
+function getEngineName(sig) {
+    return (sig.engine ?? sig.strategy ?? sig.specialist ?? '').toUpperCase().trim();
+}
+
+function matchesBiasFilter(sig, filter) {
+    const b = (sig.bias || '').toUpperCase();
+    if (filter === 'LONG') return b === 'LONG' || b === 'BUY' || b === 'BULLISH';
+    return b === 'SHORT' || b === 'SELL' || b === 'BEARISH';
+}
+
 function setFilter(f, btn) {
     currentFilter = f;
     document.querySelectorAll('.filter-pill').forEach((p) => p.classList.remove('active'));
@@ -518,11 +528,7 @@ function applyFilter(sigs) {
         return sigs.filter((s) => (s.december_verdict || 'PENDING').toUpperCase() === currentFilter);
     }
     if (['LONG', 'SHORT'].includes(currentFilter)) {
-        return sigs.filter((s) => {
-            const b = (s.bias || '').toUpperCase();
-            if (currentFilter === 'LONG') return b === 'LONG' || b === 'BUY' || b === 'BULLISH';
-            return b === 'SHORT' || b === 'SELL' || b === 'BEARISH';
-        });
+        return sigs.filter((s) => matchesBiasFilter(s, currentFilter));
     }
     return sigs;
 }
@@ -531,11 +537,7 @@ function applyFilterRts(sigs) {
     if (currentFilter === 'all') return sigs;
     if (currentFilter === 'hot') return sigs.filter((s) => conv(s) >= 75);
     if (['LONG', 'SHORT'].includes(currentFilter)) {
-        return sigs.filter((s) => {
-            const b = (s.bias || '').toUpperCase();
-            if (currentFilter === 'LONG') return b === 'LONG' || b === 'BUY' || b === 'BULLISH';
-            return b === 'SHORT' || b === 'SELL' || b === 'BEARISH';
-        });
+        return sigs.filter((s) => matchesBiasFilter(s, currentFilter));
     }
     // CONFIRM/PENDING/WAIT filters pass through all RTS signals (they use different verdict fields)
     return sigs;
@@ -586,8 +588,8 @@ function renderSignals(sigs, rtsSigs) {
     const container = document.getElementById('signals-container');
 
     // Categorise bot/gimba signals from the signals array
-    const botSigs   = sigs.filter((s) => BOT_ENGINES.has((s.engine ?? s.strategy ?? s.specialist ?? '').toUpperCase().trim()));
-    const gimbaSigs = sigs.filter((s) => GIMBA_ENGINES.has((s.engine ?? s.strategy ?? s.specialist ?? '').toUpperCase().trim()));
+    const botSigs   = sigs.filter((s) => BOT_ENGINES.has(getEngineName(s)));
+    const gimbaSigs = sigs.filter((s) => GIMBA_ENGINES.has(getEngineName(s)));
 
     // Update section counts (always unfiltered)
     document.getElementById('cnt-bots').textContent   = botSigs.length;
