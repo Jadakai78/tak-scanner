@@ -1,266 +1,73 @@
 {
-  "last_scan": "2026-07-07T04:46:10.666779+00:00",
-  "next_scan": "2026-07-07T07:45:00+00:00",
-  "f_g": {
-    "score": null,
-    "label": null
+  "oracle": {
+    "fg": 28,
+    "fg_label": "Fear",
+    "btc_regime": "TRENDDOWN",
+    "session": "Asia",
+    "activepairs": 686,
+    "deadpairs": 0,
+    "market_phase": "HOT",
+    "sgrade_count": 2,
+    "agrade_count": 5
   },
-  "active_pairs": 11,
-  "dead_pairs": 0,
-  "pair_universe": {
-    "count": 11,
-    "pairs": [
+  "council": {
+    "bot_claims": [
       {
-        "pair": "TON",
-        "altname": "TONUSD",
-        "pair_key": "TONUSD",
-        "atr_pct": 2.8962,
-        "volume_24h": 918683.93,
-        "rsi": 47.47,
-        "volume_ratio": 0.0729,
-        "close": 1.716
+        "bot": "S6",
+        "name": "Reversal",
+        "active_claims": 12,
+        "top_claims": [
+          {
+            "pair": "BTC/USD",
+            "score": 87.5,
+            "side": "LONG",
+            "confidence": 0.82,
+            "remi_status": "approved",
+            "april_status": "healthy",
+            "entry_idea": 67450.0,
+            "stop_idea": 66800.0,
+            "target_idea": 69200.0,
+            "thesis": "Exhaustion reclaim at ribbon + HTF support"
+          }
+        ]
       },
       {
-        "pair": "ADA",
-        "altname": "ADAUSD",
-        "pair_key": "ADAUSD",
-        "atr_pct": 2.7765,
-        "volume_24h": 8484369.85,
-        "rsi": 50.81,
-        "volume_ratio": 0.0495,
-        "close": 0.17986
-      },
-      {
-        "pair": "NEAR",
-        "altname": "NEARUSD",
-        "pair_key": "NEARUSD",
-        "atr_pct": 2.7239,
-        "volume_24h": 2086137.87,
-        "rsi": 51.97,
-        "volume_ratio": 0.0967,
-        "close": 2.0016
-      },
-      {
-        "pair": "AAVE",
-        "altname": "AAVEUSD",
-        "pair_key": "AAVEUSD",
-        "atr_pct": 2.662,
-        "volume_24h": 3438083.95,
-        "rsi": 54.03,
-        "volume_ratio": 0.072,
-        "close": 91.39
-      },
-      {
-        "pair": "SUI",
-        "altname": "SUIUSD",
-        "pair_key": "SUIUSD",
-        "atr_pct": 2.0175,
-        "volume_24h": 9351550.25,
-        "rsi": 44.06,
-        "volume_ratio": 0.1666,
-        "close": 0.7333
-      },
-      {
-        "pair": "TAO",
-        "altname": "TAOUSD",
-        "pair_key": "TAOUSD",
-        "atr_pct": 2.0015,
-        "volume_24h": 2477796.92,
-        "rsi": 45.69,
-        "volume_ratio": 0.064,
-        "close": 210.1775
-      },
-      {
-        "pair": "HYPE",
-        "altname": "HYPEUSD",
-        "pair_key": "HYPEUSD",
-        "atr_pct": 1.9626,
-        "volume_24h": 11929556.23,
-        "rsi": 53.41,
-        "volume_ratio": 0.1934,
-        "close": 69.95
-      },
-      {
-        "pair": "DOT",
-        "altname": "DOTUSD",
-        "pair_key": "DOTUSD",
-        "atr_pct": 1.9261,
-        "volume_24h": 371267.43,
-        "rsi": 45.32,
-        "volume_ratio": 0.075,
-        "close": 0.8585
-      },
-      {
-        "pair": "AVAX",
-        "altname": "AVAXUSD",
-        "pair_key": "AVAXUSD",
-        "atr_pct": 1.7759,
-        "volume_24h": 3391020.8,
-        "rsi": 44.08,
-        "volume_ratio": 1.2189,
-        "close": 6.757
-      },
-      {
-        "pair": "SOL",
-        "altname": "SOLUSD",
-        "pair_key": "SOLUSD",
-        "atr_pct": 1.6735,
-        "volume_24h": 23222463.97,
-        "rsi": 51.79,
-        "volume_ratio": 0.1003,
-        "close": 80.79
-      },
-      {
-        "pair": "LINK",
-        "altname": "LINKUSD",
-        "pair_key": "LINKUSD",
-        "atr_pct": 1.6604,
-        "volume_24h": 1652759.64,
-        "rsi": 48.89,
-        "volume_ratio": 0.0251,
-        "close": 7.85707
+        "bot": "S7",
+        "name": "Range Scalper",
+        "active_claims": 8,
+        "top_claims": []
       }
     ]
   },
-  "signals": [
-    {
-      "pair": "AAVE",
-      "bias": "LONG",
-      "engine": "S2",
-      "grade": "A",
-      "conviction": 0.8394,
-      "ai_st_direction": "UP",
-      "ai_st_strength": 1.0,
-      "mtf_verdict": "FULL",
-      "mtf_score": 0.925,
-      "entry": 91.39,
-      "sl": 87.74080812,
-      "tp": 98.68838376,
-      "rr": 2.0,
-      "regime": "TREND_UP",
-      "structure_quality": 1.0,
-      "remi_status": "CLEAN",
-      "remi_caution": true,
-      "kill_reason": null,
-      "december_verdict": "PENDING",
-      "tier": "TIER_A",
-      "seats": [
-        "PROP_4",
-        "PROP_3"
-      ],
-      "fired_at": "2026-07-07T04:46:10.666779+00:00",
-      "expires_at": "2026-07-07T05:01:10.666779+00:00"
-    },
-    {
-      "pair": "HYPE",
-      "bias": "LONG",
-      "engine": "S2",
-      "grade": "A",
-      "conviction": 0.8286,
-      "ai_st_direction": "UP",
-      "ai_st_strength": 1.0,
-      "mtf_verdict": "FULL",
-      "mtf_score": 0.775,
-      "entry": 69.95,
-      "sl": 67.89074077,
-      "tp": 74.06851845,
-      "rr": 2.0,
-      "regime": "TREND_UP",
-      "structure_quality": 1.0,
-      "remi_status": "CLEAN",
-      "remi_caution": true,
-      "kill_reason": null,
-      "december_verdict": "PENDING",
-      "tier": "TIER_B",
-      "seats": [
-        "PROP_2",
-        "PROP_1"
-      ],
-      "fired_at": "2026-07-07T04:46:10.666779+00:00",
-      "expires_at": "2026-07-07T05:01:10.666779+00:00"
-    },
-    {
-      "pair": "SOL",
-      "bias": "LONG",
-      "engine": "S2",
-      "grade": "A",
-      "conviction": 0.8046,
-      "ai_st_direction": "UP",
-      "ai_st_strength": 1.0,
-      "mtf_verdict": "FULL",
-      "mtf_score": 0.85,
-      "entry": 80.79,
-      "sl": 78.76199576,
-      "tp": 84.84600848,
-      "rr": 2.0,
-      "regime": "TREND_UP",
-      "structure_quality": 1.0,
-      "remi_status": "CLEAN",
-      "remi_caution": true,
-      "kill_reason": null,
-      "december_verdict": "PENDING",
-      "tier": "TIER_B",
-      "seats": [
-        "PROP_2",
-        "PROP_1"
-      ],
-      "fired_at": "2026-07-07T04:46:10.666779+00:00",
-      "expires_at": "2026-07-07T05:01:10.666779+00:00"
-    },
-    {
-      "pair": "TON",
-      "bias": "LONG",
-      "engine": "S2",
-      "grade": "C",
-      "conviction": 0.559,
-      "ai_st_direction": "DOWN",
-      "ai_st_strength": 1.0,
-      "mtf_verdict": "PARTIAL",
-      "mtf_score": 0.6,
-      "entry": 1.716,
-      "sl": 1.64145285,
-      "tp": 1.8650943,
-      "rr": 2.0,
-      "regime": "TREND_UP",
-      "structure_quality": 1.0,
-      "remi_status": "CLEAN",
-      "remi_caution": true,
-      "kill_reason": null,
-      "december_verdict": "PENDING",
-      "tier": "TIER_A",
-      "seats": [
-        "PROP_4",
-        "PROP_3"
-      ],
-      "fired_at": "2026-07-07T04:46:10.666779+00:00",
-      "expires_at": "2026-07-07T05:01:10.666779+00:00"
-    }
-  ],
-  "killed_signals": [],
-  "open_positions": [],
-  "regime_map": {
-    "TON": "TREND_UP",
-    "ADA": "TREND_UP",
-    "NEAR": "TREND_UP",
-    "AAVE": "TREND_UP",
-    "SUI": "TREND_DOWN",
-    "TAO": "TREND_DOWN",
-    "HYPE": "TREND_UP",
-    "DOT": "TREND_UP",
-    "AVAX": "TREND_DOWN",
-    "SOL": "TREND_UP",
-    "LINK": "TREND_UP"
+  "april": {
+    "open_positions": 4,
+    "total_pnl": 127.5,
+    "at_risk": 340.0,
+    "warnings": [
+      {
+        "pair": "BTC/USD",
+        "message": "Stop proximity warning",
+        "bot": "S6",
+        "severity": "caution"
+      }
+    ]
   },
-  "sprint_mode": false,
-  "session_stats": {
-    "signals_fired": 4,
-    "signals_killed": 0,
-    "s_grade_count": 0,
-    "scan_duration_sec": 18.42
+  "remi": {
+    "recent_kills": [
+      {
+        "pair": "ETH/USD",
+        "reason": "Low confidence 0.42 < 0.55",
+        "timestamp": "2026-07-20T10:03:22Z"
+      }
+    ]
   },
-  "fg": {
-    "score": 27,
-    "label": "Fear"
+  "tak": {
+    "lastscan": "2026-07-20T10:00:00Z",
+    "nextscan": "2026-07-20T10:20:00Z",
+    "bus_ok": true,
+    "cf_workers_ok": true,
+    "scheduler_ok": true
   },
-  "quiet_hours": false
+  "signals": [],
+  "killedsignals": []
 }

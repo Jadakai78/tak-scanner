@@ -1,7 +1,7 @@
 # scheduler.py — JHL Holdings loop engine
 import subprocess, time, logging, os, json, threading
 import urllib.request, urllib.error
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(message)s")
@@ -24,19 +24,46 @@ CF_KV_URL     = (
     f"https://api.cloudflare.com/client/v4/accounts/{CF_ACCOUNT_ID}"
     f"/storage/kv/namespaces/{CF_KV_NS_ID}/values/signal_bus"
 )
-SIGNAL_BUS = Path("/app/data/signal_bus.json")
+SIGNAL_BUS = MODULE_DIR / "signal_bus.json"
 # Ensure volume dir exists
 SIGNAL_BUS.parent.mkdir(parents=True, exist_ok=True)
 
 
 
 def push_to_cf():
-    """Write signal_bus.json directly to CF KV via REST API."""
-    if not SIGNAL_BUS.exists():
-        logger.warning("push_to_cf: signal_bus.json not found — skipping")
+    """Write signal_bus.json directly to CF KV via REST API.
+
+    Robust lookup order (first existing path wins):
+      1. /app/data/signal_bus.json
+      2. MODULE_DIR / "signal_bus.json"
+      3. MODULE_DIR / "signalbus.json"
+    """
+    candidates = [
+        Path("/app/data/signal_bus.json"),
+        MODULE_DIR / "signal_bus.json",
+        MODULE_DIR / "signalbus.json",
+    ]
+
+    bus_path = None
+    for p in candidates:
+        try:
+            if p.exists():
+                bus_path = p
+                break
+        except Exception:
+            # If there's a permission or FS error, continue to next candidate
+            continue
+
+    if not bus_path:
+        logger.warning(
+            "push_to_cf: no signal bus file found in canonical locations (%s) — skipping",
+            ", ".join(str(x) for x in candidates),
+        )
         return
+
+    logger.info("push_to_cf: using signal bus file: %s", bus_path)
     try:
-        payload = SIGNAL_BUS.read_bytes()
+        payload = bus_path.read_bytes()
         req = urllib.request.Request(
             CF_KV_URL,
             data=payload,
@@ -154,9 +181,8 @@ def run():
         try:
             if SIGNAL_BUS.exists():
                 _bus = json.loads(SIGNAL_BUS.read_text())
-                _next = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S+00:00")
-                from datetime import timedelta as _td
-                _next_dt = datetime.utcnow() + _td(seconds=INTERVAL_SECONDS)
+                _next = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S+00:00")
+                _next_dt = datetime.now(timezone.utc) + timedelta(seconds=INTERVAL_SECONDS)
                 _bus["next_scan"] = _next_dt.strftime("%Y-%m-%dT%H:%M:%S+00:00")
                 _bus["scanner_heartbeat"] = _next
                 _bus["worker_push_ok"] = True

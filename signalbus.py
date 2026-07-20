@@ -15,8 +15,13 @@ logging.basicConfig(
 logger = logging.getLogger("signalbus")
 
 MODULE_DIR = Path(__file__).resolve().parent
-SIGNALBUS_PATH = MODULE_DIR / "signalbus.json"
-TMP_PATH = MODULE_DIR / "signalbus.tmp.json"
+# Canonical runtime location (volume mount) — default for writers
+APP_DATA = Path("/app/data")
+SIGNALBUS_PATH = APP_DATA / "signal_bus.json"
+TMP_PATH = APP_DATA / "signal_bus.tmp.json"
+# Legacy fallbacks (read-only compatibility)
+LEGACY_SIGNALBUS = MODULE_DIR / "signalbus.json"
+LEGACY_SIGNAL_BUS = MODULE_DIR / "signal_bus.json"
 
 DEFAULT_MAX_AGE_HOURS = 4
 
@@ -40,20 +45,31 @@ _EMPTY_BUS: Dict[str, Any] = {
     },
 }
 
+
 class SignalBus:
     def __init__(self, path: Optional[Path] = None, tmp_path: Optional[Path] = None) -> None:
+        # Default writer goes to /app/data/signal_bus.json
         self.path = path or SIGNALBUS_PATH
         self.tmp_path = tmp_path or TMP_PATH
 
+    def _candidates(self) -> list[Path]:
+        # Read candidates in preferred order for backward compatibility
+        return [APP_DATA / "signal_bus.json", LEGACY_SIGNAL_BUS, LEGACY_SIGNALBUS]
+
     def read(self) -> Dict[str, Any]:
         bus = dict(_EMPTY_BUS)
-        if self.path.exists():
+        # Try configured path first, then fallbacks
+        paths_to_try = [self.path] + [p for p in self._candidates() if p != self.path]
+        for p in paths_to_try:
             try:
-                loaded = json.loads(self.path.read_text(encoding="utf-8") or "{}")
-                if isinstance(loaded, dict):
-                    bus.update(loaded)
+                if p.exists():
+                    loaded = json.loads(p.read_text(encoding="utf-8") or "{}")
+                    if isinstance(loaded, dict):
+                        bus.update(loaded)
+                    break
             except (json.JSONDecodeError, OSError) as exc:
-                logger.error("Failed reading signal bus (%s); using empty template.", exc)
+                logger.error("Failed reading signal bus (%s); trying next candidate.", exc)
+                continue
         return bus
 
     def write(self, bus: Dict[str, Any]) -> None:
@@ -106,12 +122,46 @@ class SignalBus:
     def _atomic_write(self, bus: Dict[str, Any]) -> None:
         try:
             payload = json.dumps(bus, indent=2, default=str)
+            # Ensure the parent directory exists
+            try:
+                self.path.parent.mkdir(parents=True, exist_ok=True)
+            except Exception:
+                pass
+            # Write tmp file in same directory for atomic replace
+            try:
+                self.tmp_path.parent.mkdir(parents=True, exist_ok=True)
+            except Exception:
+                pass
             self.tmp_path.write_text(payload, encoding="utf-8")
-            os.replace(self.tmp_path, self.path)
+            os.replace(str(self.tmp_path), str(self.path))
+
+            # After successful replace, collect mtime and write a debug helper file
+            try:
+                mtime = None
+                try:
+                    mtime = datetime.utcfromtimestamp(self.path.stat().st_mtime).isoformat() + 'Z'
+                except Exception:
+                    mtime = None
+                debug = {
+                    "written_path": str(self.path.resolve()),
+                    "written_at": datetime.now(timezone.utc).isoformat(),
+                    "file_mtime": mtime,
+                    "signals_count": len(bus.get("signals", [])),
+                    "killed_count": len(bus.get("killedsignals", [])),
+                }
+                dbgpath = self.path.parent / "signal_bus.write_debug.json"
+                try:
+                    dbgpath.write_text(json.dumps(debug, ensure_ascii=False, indent=2), encoding="utf-8")
+                except Exception:
+                    logger.debug("Failed to write debug helper file %s", dbgpath)
+            except Exception:
+                pass
+
             logger.info(
-                "Signal bus written: %d signals, %d killed.",
+                "Signal bus written: %d signals, %d killed. path=%s",
                 len(bus.get("signals", [])),
                 len(bus.get("killedsignals", [])),
+                str(self.path),
             )
         except OSError as exc:
             logger.error("Atomic write failed: %s", exc)

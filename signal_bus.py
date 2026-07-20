@@ -22,8 +22,12 @@ logging.basicConfig(
 logger = logging.getLogger("signal_bus")
 
 MODULE_DIR = Path(__file__).resolve().parent
-SIGNAL_BUS_PATH = MODULE_DIR / "signal_bus.json"
-TMP_PATH = MODULE_DIR / "signal_bus.tmp.json"
+APP_DATA = Path("/app/data")
+SIGNAL_BUS_PATH = APP_DATA / "signal_bus.json"
+TMP_PATH = APP_DATA / "signal_bus.tmp.json"
+# Legacy fallbacks for read-only compatibility
+LEGACY_SIGNAL_BUS = MODULE_DIR / "signal_bus.json"
+LEGACY_SIGNALBUS = MODULE_DIR / "signalbus.json"
 
 DEFAULT_MAX_AGE_HOURS = 4
 
@@ -52,18 +56,31 @@ class SignalBus:
     """Reads/writes the shared ``signal_bus.json`` state file atomically."""
 
     def __init__(self, path: Optional[Path] = None, tmp_path: Optional[Path] = None) -> None:
+        # Default writer points at /app/data/signal_bus.json
         self.path = path or SIGNAL_BUS_PATH
         self.tmp_path = tmp_path or TMP_PATH
 
+    def _candidates(self) -> list[Path]:
+        # Preferred read candidates in order
+        return [APP_DATA / "signal_bus.json", LEGACY_SIGNAL_BUS, LEGACY_SIGNALBUS]
+
     def get_signals(self) -> Dict[str, Any]:
-        """Read and return the current bus, or an empty template on failure."""
+        """Read and return the current bus, or an empty template on failure.
+
+        Tries the configured path first, then falls back to legacy locations.
+        """
         bus = dict(_EMPTY_BUS)
-        if self.path.exists():
+        paths_to_try = [self.path] + [p for p in self._candidates() if p != self.path]
+        for p in paths_to_try:
             try:
-                loaded = json.loads(self.path.read_text() or "{}")
-                bus.update(loaded)
+                if p.exists():
+                    loaded = json.loads(p.read_text(encoding="utf-8") or "{}")
+                    if isinstance(loaded, dict):
+                        bus.update(loaded)
+                    break
             except (json.JSONDecodeError, OSError) as exc:
-                logger.error("Failed reading bus (%s) — returning template.", exc)
+                logger.error("Failed reading bus %s (%s) — trying next candidate.", p, exc)
+                continue
         return self._normalize_bus(bus)
 
     def update(self, scan_results: Dict[str, Any]) -> None:
@@ -96,6 +113,7 @@ class SignalBus:
     def _normalize_bus(bus: Dict[str, Any]) -> Dict[str, Any]:
         """Normalize schema so legacy keys do not survive indefinitely."""
         normalized = dict(bus)
+        # Normalize f_g / fg older naming
         if "f_g" in normalized and normalized.get("f_g") is not None:
             normalized.pop("fg", None)
         elif "fg" in normalized and normalized.get("fg") is not None:
@@ -108,13 +126,13 @@ class SignalBus:
         exp = sig.get("expires_at")
         if exp:
             try:
-                return datetime.fromisoformat(exp.replace("Z", "+00:00")) > now
+                return datetime.fromisoformat(str(exp).replace("Z", "+00:00")) > now
             except ValueError:
                 pass
         fired = sig.get("fired_at")
         if fired:
             try:
-                return datetime.fromisoformat(fired.replace("Z", "+00:00")) > cutoff
+                return datetime.fromisoformat(str(fired).replace("Z", "+00:00")) > cutoff
             except ValueError:
                 pass
         return True
@@ -122,8 +140,19 @@ class SignalBus:
     def _atomic_write(self, bus: Dict[str, Any]) -> None:
         """Write the bus to a temp file then atomically replace the target."""
         try:
-            self.tmp_path.write_text(json.dumps(bus, indent=2, default=str))
-            os.replace(self.tmp_path, self.path)
+            payload = json.dumps(bus, indent=2, default=str)
+            # Ensure parent directories exist
+            try:
+                self.path.parent.mkdir(parents=True, exist_ok=True)
+            except Exception:
+                pass
+            try:
+                self.tmp_path.parent.mkdir(parents=True, exist_ok=True)
+            except Exception:
+                pass
+            # Write tmp file in same directory as target and atomically replace
+            self.tmp_path.write_text(payload, encoding="utf-8")
+            os.replace(str(self.tmp_path), str(self.path))
             logger.info(
                 "Signal bus written: %d signals, %d killed.",
                 len(bus.get("signals", [])),

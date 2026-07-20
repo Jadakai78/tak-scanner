@@ -32,6 +32,7 @@ _kraken_lock = _threading.Lock()
 _kraken_cycle_log: list = []   # last 20 cycle summaries
 _kraken_open_trades: dict = {} # pair -> {opened_at, signal, status}
 
+
 def _start_kraken_bot():
     global _kraken_bot, _kraken_cycle_log, _kraken_open_trades
     try:
@@ -88,6 +89,7 @@ AGING_CONV_FLOOR = 68.0  # conviction floor for PENDING signals
 AGING_TRAP_GATE  = 0.65  # trap ceiling for PENDING signals
 AGING_MAX_AGE    = 600   # 10 min max lifetime for an unactioned PENDING signal
 
+
 def _signal_aging_loop():
     """Background thread — prunes stale PENDING signals from the bus."""
     import time as _time
@@ -97,7 +99,8 @@ def _signal_aging_loop():
             _time.sleep(AGING_INTERVAL)
             _run_signal_aging()
         except Exception as exc:
-                        _aging_logger.warning("Signal aging error: %s", exc)
+            _aging_logger.warning("Signal aging error: %s", exc)
+
 
 def _run_signal_aging():
     """Single aging pass — remove PENDING signals that have gone stale."""
@@ -208,6 +211,28 @@ def load_signal_bus():
     except (FileNotFoundError, json.JSONDecodeError):
         data = {"signals": [], "rts_signals": []}
 
+    # --- Debug: write read diagnostic for runtime inspection -----------------
+    try:
+        try:
+            mtime = datetime.utcfromtimestamp(SIGNAL_BUS.stat().st_mtime).isoformat() + 'Z'
+        except Exception:
+            mtime = None
+        read_debug = {
+            "read_path": str(SIGNAL_BUS.resolve()),
+            "read_at": datetime.now(timezone.utc).isoformat(),
+            "file_mtime": mtime,
+            "lastscan": data.get("lastscan") or data.get("last_scan") or (data.get("tak") or {}).get("lastscan"),
+            "signals_count": len(data.get("signals", []) or []),
+        }
+        dbgpath = SIGNAL_BUS.parent / "signal_bus.read_debug.json"
+        try:
+            dbgpath.write_text(json.dumps(read_debug, ensure_ascii=False, indent=2), encoding="utf-8")
+        except Exception:
+            _aging_logger.debug("Failed to write read debug file %s", dbgpath)
+    except Exception:
+        pass
+    # -------------------------------------------------------------------------
+
     # Inject account data
     baselines = data.get("session_baselines", {})
     accounts = []
@@ -226,7 +251,7 @@ def load_signal_bus():
     return data
 
 
-# ── API routes ──────────────────────────────────────────────────────────────
+# ── API routes ──────────────────────────────────────────────────────────
 
 @app.route("/api/signals")
 def signals():
@@ -316,12 +341,12 @@ def _push_verdict_to_kv(bus: dict):
         with urllib.request.urlopen(req, timeout=8) as resp:
             return resp.status == 200
     except Exception as _e:
-                _aging_logger.warning("KV verdict push failed: %s", _e)
+        _aging_logger.warning("KV verdict push failed: %s", _e)
         # ──             _aging_logger.warning so verdict survives CF being down ──
-                try:
-                                                SIGNAL_BUS.write_bytes(json.dumps(bus, ensure_ascii=False, indent=2).encode())
-                except Exception:
-                                pass
+        try:
+            SIGNAL_BUS.write_bytes(json.dumps(bus, ensure_ascii=False, indent=2).encode())
+        except Exception:
+            pass
 
 @app.route("/api/position/execute", methods=["POST"])
 def position_execute():
