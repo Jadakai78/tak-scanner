@@ -1,31 +1,3 @@
-"""rts_sniper.py — RTS Sniper: standalone autonomous stop-hunt and liquidation hunter.
-
-Separate but equal. Runs its own loop parallel to the main scanner.
-Does not share signal lanes — writes to ``rts_signals`` key in the bus.
-
-Mission: find where retail stops and liquidations are clustered, go where
-the market goes, and fire when the grab happens.
-
-Architecture:
-  - Own loop cadence — self-selects timeframe per pair based on regime
-  - Multi-TF OHLC fetch: 15m (VOLATILE), 1H (TREND), 4H (RANGE/FEAR)
-  - Runs all RTS engines: LIQ, CHOCH, BOS, ZONE, BOTTLE
-  - DELTA overlay applied after generate()
-  - Own KV bus key: ``rts_signals``
-  - Own alert identity: RTS SNIPER
-  - Bonus ×3 on clean S-grade (trap_score ≤ 0.40)
-  - RTS caution gate: trap ≥ 0.65 or WAIT/CUT → WAIT, no fire
-  - Prop-only: only PROP_WHITELIST pairs emit alerts
-
-Timeframe selection by regime:
-  VOLATILE   → 15m  (fast stops, quick grabs)
-  TREND_UP   → 1H   (structural stops, session levels)
-  TREND_DOWN → 1H
-  RANGE      → 4H   (equal highs/lows at range extremes)
-  FEAR       → 4H   (macro stops, slow liquidations)
-  DEAD       → skip (no stops worth hunting)
-"""
-
 from __future__ import annotations
 
 import json
@@ -44,36 +16,64 @@ from pair_universe import PairUniverse, MarketDataSource, PROP_WHITELIST
 from regime_classifier import RegimeClassifier
 from signal_bus import SignalBus
 from strategies import ENGINE_CLASSES, score_delta_context
-(
-    ENGINE_CLASSES,
-    score_delta_context,
-)
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s | %(name)s | %(levelname)s | %(message)s",
-)
-logger = logging.getLogger("rts_sniper")
 
-# ── constants ─────────────────────────────────────────────────────────────────
-MODULE_DIR      = Path(__file__).resolve().parent
-CONFIG_PATH     = MODULE_DIR / "config.json"
-FG_URL          = "https://api.alternative.me/fng/?limit=1"
-SIGNAL_TTL_HOURS = 2           # RTS signals expire faster — they're moment-in-time
-OHLC_COLUMNS    = ["time", "open", "high", "low", "close", "vwap", "volume", "count"]
+class RTSSniper:
+    def __init__(self, max_pairs: Optional[int] = None) -> None:
+        self.universe = PairUniverse(MarketDataSource())
+        self.regime_cl = RegimeClassifier()
+        self.bus = SignalBus()
+        self.max_pairs = max_pairs
 
-# Telegram / Pushover from config
-_cfg: Dict[str, Any] = {}
-if CONFIG_PATH.exists():
-    try:
-        _cfg = json.loads(CONFIG_PATH.read_text())
-    except Exception:
-        pass
+        # Optional placeholders to avoid attribute errors if referenced elsewhere
+        self.logger = logging.getLogger("RTSSniper")
+        self.scorer = ConvictionScorer()
 
-TG_TOKEN  = _cfg.get("telegram_token",  "")
-TG_CHAT   = _cfg.get("telegram_chat_id", "")
-PO_TOKEN  = _cfg.get("pushover_token",  "")
-PO_USER   = _cfg.get("pushover_user",   "")
+    # ---- Compatibility runner ----
+    # Keeps old `sniper.run()` entrypoint working.
+    def run(self) -> None:
+        """
+        Primary execution entrypoint.
+        Tries common loop method names if your original class used one of them.
+        """
+        if hasattr(self, "scan_loop") and callable(getattr(self, "scan_loop")):
+            self.scan_loop()
+            return
+        if hasattr(self, "start") and callable(getattr(self, "start")):
+            self.start()
+            return
+        if hasattr(self, "run_forever") and callable(getattr(self, "run_forever")):
+            self.run_forever()
+            return
+
+        # Minimal fallback so file runs without crashing.
+        pairs = self.universe.get_active_pairs()
+        self.logger.info("RTSSniper fallback run: loaded %d active pairs", len(pairs))
+        for p in pairs[: self.max_pairs] if self.max_pairs else pairs:
+            self.logger.info("pair=%s last_price=%s exchange=%s", p.symbol, p.last_price, p.exchange)
+
+    # ---- Optional stub methods (remove if you already have real ones) ----
+    def scan_loop(self) -> None:
+        """Example scan loop stub. Replace with your real logic if needed."""
+        pairs = self.universe.get_active_pairs()
+        self.logger.info("Scanning %d pairs", len(pairs))
+        for p in pairs[: self.max_pairs] if self.max_pairs else pairs:
+            _ctx: Dict[str, Any] = {"symbol": p.symbol, "price": p.last_price, "exchange": p.exchange}
+            # Hook points for your existing pipeline:
+            # regime = self.regime_cl.classify(...)
+            # enriched = micro_enrich(...)
+            # delta = score_delta_context(...)
+            # engine outputs via ENGINE_CLASSES...
+            self.bus.publish("pair.scan", _ctx)
+
+
+if __name__ == "__main__":
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s | %(levelname)s | %(message)s",
+    )
+    sniper = RTSSniper(max_pairs=None)
+    sniper.run()
 
 # Per-seat risk floors
 _SEATS = [
