@@ -337,6 +337,124 @@ class TakScannerV4:
             except Exception as e:
                 logger.exception(f"Alert failed: {e}")
 
+    def _fg_label(self, fg: int) -> str:
+        """Convert F&G number to label"""
+        if fg < 25:
+            return "Extreme Fear"
+        elif fg < 45:
+            return "Fear"
+        elif fg < 55:
+            return "Neutral"
+        elif fg < 75:
+            return "Greed"
+        else:
+            return "Extreme Greed"
+    
+    def _get_session(self, now: datetime) -> str:
+        """Determine market session based on UTC hour"""
+        hour = now.hour
+        if 0 <= hour < 8:
+            return "Asia"
+        elif 8 <= hour < 16:
+            return "London"
+        else:
+            return "NY"
+    
+    def _market_phase(self, fg: int, signal_count: int) -> str:
+        """Determine market phase based on signal count"""
+        if signal_count >= 10:
+            return "HOT"
+        elif signal_count >= 5:
+            return "WARM"
+        elif signal_count >= 1:
+            return "COLD"
+        else:
+            return "DEAD"
+    
+    def _bot_name(self, bot: str) -> str:
+        """Map bot code to display name"""
+        names = {
+            "S6": "Reversal",
+            "S7": "Range Scalper",
+            "S9": "Capitulation",
+            "S1": "Sniper",
+            "S2": "Trend Rider",
+            "S3": "Volatile",
+            "S4": "Mean Reversion",
+            "S5": "EMA Cross",
+            "S8": "MTF Confluence",
+            "S10": "Gimba Range"
+        }
+        return names.get(bot, bot)
+    
+    def _remi_status(self, candidate) -> str:
+        """Determine Remi status from candidate review"""
+        if not candidate.review:
+            return "unknown"
+        
+        decision = candidate.review.decision
+        if decision == "approve":
+            return "approved"
+        elif decision in ["caution", "watchlist"]:
+            return "caution"
+        else:
+            return "killed"
+    
+    def _kill_reason(self, killed_signal: dict) -> str:
+        """Extract kill reason from killed signal"""
+        # Try to get from review or council
+        review = killed_signal.get("review")
+        council = killed_signal.get("council")
+        
+        if council and council.get("veto_reasons"):
+            return ", ".join(council["veto_reasons"][:2])  # First 2 reasons
+        
+        if review and review.get("caution_flags"):
+            return ", ".join(review["caution_flags"][:2])
+        
+        return "Quality threshold"
+    
+    def _build_council_data(self, candidates: list) -> dict:
+        """Group candidates by specialist and rank by score"""
+        from collections import defaultdict
+        
+        bot_groups = defaultdict(list)
+        
+        for candidate in candidates:
+            bot = candidate.specialist
+            
+            # Build claim dict
+            claim = {
+                "pair": candidate.pair,
+                "score": round(candidate.score, 1),
+                "side": candidate.side,
+                "confidence": round(candidate.confidence, 3),
+                "remi_status": self._remi_status(candidate),
+                "april_status": "healthy",  # TODO: Real April logic when positions exist
+                "entry_idea": candidate.entry_idea,
+                "stop_idea": candidate.stop_idea,
+                "target_idea": candidate.target_idea,
+                "thesis": candidate.thesis[:80] if candidate.thesis else "No thesis"
+            }
+            
+            bot_groups[bot].append(claim)
+        
+        # Sort each bot's claims by score desc, take top 10
+        bot_claims = []
+        for bot, claims in bot_groups.items():
+            sorted_claims = sorted(claims, key=lambda x: x["score"], reverse=True)[:10]
+            bot_claims.append({
+                "bot": bot,
+                "name": self._bot_name(bot),
+                "active_claims": len(claims),
+                "top_claims": sorted_claims
+            })
+        
+        # Sort bots by active claims desc
+        bot_claims.sort(key=lambda x: x["active_claims"], reverse=True)
+        
+        return {"bot_claims": bot_claims}
+
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
