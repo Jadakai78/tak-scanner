@@ -114,7 +114,8 @@ class TakScannerV4:
         contexts: List[PairContext] = []
 
         logger.info("Oracle building contexts for %s active pairs", len(active))
-        for pair in active:
+        for pair_item in active:
+            pair = pair_item["pair"] if isinstance(pair_item, dict) else pair_item
             ohlc_df = self.universe.fetch_ohlc(pair, interval=240)
             regime = self.classifier.classify(pair, ohlc_df, fg_score)
             regime_map[pair] = regime
