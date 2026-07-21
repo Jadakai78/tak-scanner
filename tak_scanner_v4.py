@@ -6,6 +6,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+import pandas as pd
 import requests
 
 from convictionscorer import ConvictionScorer
