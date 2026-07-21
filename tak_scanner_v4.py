@@ -114,9 +114,7 @@ class TakScannerV4:
 
         logger.info("Oracle building contexts for %s active pairs", len(active))
         for pair in active:
-            ohlc_df = self.<fetch candles method>(pair)
-            fg_score = fg.get("score") if isinstance(fg, dict) else fg
-            regime = self.classifier.classify(pair, ohlc_df, fg_score)
+            regime = self.classifier.classify(pair)
             regime_map[pair] = regime
             contexts.append(
                 PairContext(
