@@ -1,5 +1,5 @@
 # server.py — JHL Holdings live signal API + terminal feed server (Railway-only)
-from flask import Flask, jsonify, send_file, redirect
+from flask import Flask, jsonify, send_file
 from flask_cors import CORS
 import json
 import threading
@@ -31,6 +31,33 @@ _kraken_bot = None
 _kraken_lock = _threading.Lock()
 _kraken_cycle_log: list = []
 _kraken_open_trades: dict = {}
+_kraken_skip_stats: dict = {
+    "verdict": 0,
+    "conviction": 0,
+    "trap": 0,
+    "age": 0,
+    "duplicate": 0,
+    "missing_fields": 0,
+    "unknown": 0,
+}
+_kraken_skip_samples: list = []  # last 20 skip samples
+
+
+def _record_skip(reason: str, pair: str, detail: str = ""):
+    """Track skip reasons across cycles so '4 skipped' can be diagnosed quickly."""
+    with _kraken_lock:
+        if reason not in _kraken_skip_stats:
+            _kraken_skip_stats[reason] = 0
+        _kraken_skip_stats[reason] += 1
+        _kraken_skip_samples.append({
+            "ts": datetime.now(timezone.utc).isoformat(),
+            "pair": pair,
+            "reason": reason,
+            "detail": detail,
+        })
+        if len(_kraken_skip_samples) > 20:
+            _kraken_skip_samples.pop(0)
+
 
 def _start_kraken_bot():
     global _kraken_bot, _kraken_cycle_log, _kraken_open_trades
@@ -42,17 +69,40 @@ def _start_kraken_bot():
         import logging as _log
         _klog = _log.getLogger("kraken_bot_daemon")
         _klog.info("Kraken bot daemon started — dryrun=%s", bot.executor.dryrun)
+
         while True:
             try:
                 summary = bot.process_cycle()
                 summary["ts"] = datetime.now(timezone.utc).isoformat()
+
+                # Attempt to capture skip reason details if bot exposes them
+                # (non-breaking: only reads optional attributes)
+                try:
+                    skipped = int(summary.get("skipped", 0) or 0)
+                except Exception:
+                    skipped = 0
+
+                if skipped > 0:
+                    # Optional fields the bot may set; we consume if present
+                    skip_reasons = summary.get("skipped_by_reason") or {}
+                    if isinstance(skip_reasons, dict):
+                        for k, v in skip_reasons.items():
+                            try:
+                                count = int(v or 0)
+                            except Exception:
+                                count = 0
+                            if count > 0:
+                                with _kraken_lock:
+                                    _kraken_skip_stats[k] = _kraken_skip_stats.get(k, 0) + count
+
                 with _kraken_lock:
-                    _kraken_open_trades = dict(bot._open_trades)
+                    _kraken_open_trades = dict(getattr(bot, "_open_trades", {}))
                     _kraken_cycle_log.append(summary)
                     if len(_kraken_cycle_log) > 20:
                         _kraken_cycle_log.pop(0)
             except Exception as exc:
                 _klog.error("Kraken bot cycle error: %s", exc)
+
             __import__("time").sleep(bot.poll_interval)
     except Exception as exc:
         import logging as _log
@@ -77,10 +127,11 @@ _monitor_thread.start()
 import logging as _logging
 _aging_logger = _logging.getLogger("signal_aging")
 
-AGING_INTERVAL   = 300
+AGING_ENABLED    = True
+AGING_INTERVAL   = 300    # 5 min
 AGING_CONV_FLOOR = 68.0
 AGING_TRAP_GATE  = 0.65
-AGING_MAX_AGE    = 600
+AGING_MAX_AGE    = 3600   # was 600; now 60 min for stability
 
 def _norm_conviction_pct(sig: dict) -> float:
     raw = None
@@ -105,8 +156,14 @@ def _norm_verdict(sig: dict) -> str:
         or "PENDING"
     )
     v = str(raw).upper().strip()
-    aliases = {"EXECUTED":"CONFIRM", "APPROVED":"CONFIRM", "HOLD":"WAIT", "DENY":"REJECT", "KILLED":"REJECT"}
-    return aliases.get(v, v if v in {"PENDING","CONFIRM","WAIT","REJECT","EXPIRED"} else "PENDING")
+    aliases = {
+        "EXECUTED": "CONFIRM",
+        "APPROVED": "CONFIRM",
+        "HOLD": "WAIT",
+        "DENY": "REJECT",
+        "KILLED": "REJECT"
+    }
+    return aliases.get(v, v if v in {"PENDING", "CONFIRM", "WAIT", "REJECT", "EXPIRED"} else "PENDING")
 
 def _norm_fired_at(sig: dict) -> str:
     return sig.get("fired_at") or sig.get("created_at") or sig.get("ts") or sig.get("timestamp") or ""
@@ -116,6 +173,16 @@ def _norm_trap_risk(sig: dict) -> float:
         return float(sig.get("trap_risk", sig.get("trap_score", 0)) or 0)
     except Exception:
         return 0.0
+
+def _signal_age_seconds(sig: dict, now: datetime) -> int:
+    fired_at_str = _norm_fired_at(sig)
+    if not fired_at_str:
+        return 9999
+    try:
+        fired_at = datetime.fromisoformat(str(fired_at_str).replace("Z", "+00:00"))
+        return int((now - fired_at).total_seconds())
+    except Exception:
+        return 9999
 
 def _normalize_signal_inplace(sig: dict) -> dict:
     sig["_conviction_pct"] = _norm_conviction_pct(sig)
@@ -135,11 +202,12 @@ def _write_bus(bus: dict):
 
 def _signal_aging_loop():
     import time as _time
-    _aging_logger.info("Signal aging loop started — interval=%ds", AGING_INTERVAL)
+    _aging_logger.info("Signal aging loop started — enabled=%s interval=%ds max_age=%ss", AGING_ENABLED, AGING_INTERVAL, AGING_MAX_AGE)
     while True:
         try:
             _time.sleep(AGING_INTERVAL)
-            _run_signal_aging()
+            if AGING_ENABLED:
+                _run_signal_aging()
         except Exception as exc:
             _aging_logger.warning("Signal aging error: %s", exc)
 
@@ -154,27 +222,20 @@ def _run_signal_aging():
         _normalize_signal_inplace(sig)
         verdict = sig["_verdict"]
 
+        # Keep already finalized signals
         if verdict in ("CONFIRM", "WAIT", "REJECT", "EXPIRED"):
             signals_out.append(sig)
             continue
 
         conv = sig["_conviction_pct"]
         trap_risk = sig["_trap_risk"]
-
-        fired_at_str = sig["_fired_at"]
-        age_seconds = 9999
-        if fired_at_str:
-            try:
-                fired_at = datetime.fromisoformat(str(fired_at_str).replace("Z", "+00:00"))
-                age_seconds = (now - fired_at).total_seconds()
-            except Exception:
-                pass
+        age_seconds = _signal_age_seconds(sig, now)
 
         reasons = []
         if conv < AGING_CONV_FLOOR:
             reasons.append(f"conviction {conv:.1f}<{AGING_CONV_FLOOR}")
         if trap_risk >= AGING_TRAP_GATE:
-            reasons.append(f"trap {trap_risk:.2f}≥{AGING_TRAP_GATE}")
+            reasons.append(f"trap {trap_risk:.2f}>={AGING_TRAP_GATE}")
         if age_seconds > AGING_MAX_AGE:
             reasons.append(f"age {int(age_seconds)}s>{AGING_MAX_AGE}s")
 
@@ -187,6 +248,14 @@ def _run_signal_aging():
             sig["expired_at"] = now.isoformat()
             sig["expiry_reason"] = " | ".join(reasons)
             sig["_verdict"] = "EXPIRED"
+
+            # diagnostic feed for skipped root-cause
+            if age_seconds > AGING_MAX_AGE:
+                _record_skip("age", pair, f"{age_seconds}s>{AGING_MAX_AGE}s")
+            if conv < AGING_CONV_FLOOR:
+                _record_skip("conviction", pair, f"{conv:.1f}<{AGING_CONV_FLOOR}")
+            if trap_risk >= AGING_TRAP_GATE:
+                _record_skip("trap", pair, f"{trap_risk:.2f}>={AGING_TRAP_GATE}")
 
         signals_out.append(sig)
 
@@ -207,6 +276,7 @@ ACCOUNTS = [
 
 def load_signal_bus():
     data = _read_bus()
+    now = datetime.now(timezone.utc)
 
     data["last_scan"] = (
         data.get("lastscan")
@@ -222,11 +292,37 @@ def load_signal_bus():
     data["market_active_pairs"] = data.get("activepairs") or (data.get("oracle") or {}).get("activepairs") or 0
 
     counts = {"PENDING": 0, "CONFIRM": 0, "WAIT": 0, "REJECT": 0, "EXPIRED": 0}
+    reason_counts = {"age": 0, "conviction": 0, "trap": 0, "verdict": 0, "missing_fields": 0}
     for s in signals:
         v = s.get("_verdict", "PENDING")
         counts[v] = counts.get(v, 0) + 1
+
+        # derive coarse skip reasons for debugging visibility
+        conv = s.get("_conviction_pct", 100.0)
+        trap = s.get("_trap_risk", 0.0)
+        age = _signal_age_seconds(s, now)
+
+        if v != "PENDING":
+            reason_counts["verdict"] += 1
+        if conv < AGING_CONV_FLOOR:
+            reason_counts["conviction"] += 1
+        if trap >= AGING_TRAP_GATE:
+            reason_counts["trap"] += 1
+        if age > AGING_MAX_AGE:
+            reason_counts["age"] += 1
+        if not s.get("pair") or (not s.get("engine") and not s.get("bot")):
+            reason_counts["missing_fields"] += 1
+
     data["_signal_verdict_counts"] = counts
-    data["_server_normalizer"] = "railway_only_v1"
+    data["_signal_skip_reason_estimate"] = reason_counts
+    data["_server_normalizer"] = "railway_only_v2"
+    data["_aging"] = {
+        "enabled": AGING_ENABLED,
+        "interval_sec": AGING_INTERVAL,
+        "conv_floor": AGING_CONV_FLOOR,
+        "trap_gate": AGING_TRAP_GATE,
+        "max_age_sec": AGING_MAX_AGE,
+    }
 
     baselines = data.get("session_baselines", {})
     accounts = []
@@ -323,6 +419,8 @@ def position_execute():
                 updated = True
         if updated:
             _write_bus(bus)
+        else:
+            _record_skip("missing_fields", pair, "execute called but no matching signal found")
         with _kraken_lock:
             _kraken_open_trades[pair] = {
                 "opened_at": datetime.now(timezone.utc).isoformat(),
@@ -342,12 +440,16 @@ def position_wait():
         return jsonify({"ok": False, "error": "pair required"}), 400
     try:
         bus = _read_bus()
+        hit = False
         for sig in bus.get("signals", []):
             if sig.get("pair") == pair:
                 sig["december_verdict"] = "WAIT"
                 sig["verdict"] = "WAIT"
                 sig["wait_at"] = datetime.now(timezone.utc).isoformat()
+                hit = True
         _write_bus(bus)
+        if not hit:
+            _record_skip("missing_fields", pair, "wait called but no matching signal found")
         return jsonify({"ok": True, "pair": pair, "verdict": "WAIT"})
     except Exception as exc:
         return jsonify({"ok": False, "error": str(exc)}), 500
@@ -361,12 +463,16 @@ def position_reject():
         return jsonify({"ok": False, "error": "pair required"}), 400
     try:
         bus = _read_bus()
+        hit = False
         for sig in bus.get("signals", []):
             if sig.get("pair") == pair:
                 sig["december_verdict"] = "REJECT"
                 sig["verdict"] = "REJECT"
                 sig["rejected_at"] = datetime.now(timezone.utc).isoformat()
+                hit = True
         _write_bus(bus)
+        if not hit:
+            _record_skip("missing_fields", pair, "reject called but no matching signal found")
         with _kraken_lock:
             _kraken_open_trades.pop(pair, None)
         return jsonify({"ok": True, "pair": pair, "verdict": "REJECT"})
@@ -381,6 +487,9 @@ def kraken_status():
             bot = _kraken_bot
             cycles = list(_kraken_cycle_log)
             trades = dict(_kraken_open_trades)
+            skip_stats = dict(_kraken_skip_stats)
+            skip_samples = list(_kraken_skip_samples)
+
         if bot is None:
             return jsonify({"running": False, "reason": "bot not started"})
 
@@ -403,6 +512,8 @@ def kraken_status():
             "cycle_log": cycles[-5:],
             "balance": balance,
             "daily_loss": getattr(bot.executor, "daily_loss", 0.0),
+            "skip_stats": skip_stats,
+            "skip_samples": skip_samples[-10:],
         })
     except Exception as exc:
         return jsonify({"running": False, "error": str(exc)}), 500
