@@ -1,7 +1,32 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Dict, List, Literal, Optional
+from typing import Any, Dict, List, Literal, Optional
+
+
+@dataclass
+class PairContext:
+    pair: str
+    market_regime: str
+    timeframe: str = "1h"
+    fear_greed: Optional[int] = None
+    session: Optional[str] = None
+    indicators: Dict[str, Any] = field(default_factory=dict)
+    market_state: Dict[str, Any] = field(default_factory=dict)
+    shared_state: Dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "pair": self.pair,
+            "market_regime": self.market_regime,
+            "timeframe": self.timeframe,
+            "fear_greed": self.fear_greed,
+            "session": self.session,
+            "indicators": dict(self.indicators),
+            "market_state": dict(self.market_state),
+            "shared_state": dict(self.shared_state),
+        }
+
 
 SpecialistActionBias = Literal["signal", "caution", "kill", "flat"]
 
@@ -24,7 +49,7 @@ class BooleanIshSpecialistResult:
     kill_reasons: List[str] = field(default_factory=list)
     diagnostics: Dict[str, str] = field(default_factory=dict)
 
-    def to_dict(self) -> Dict[str, object]:
+    def to_dict(self) -> Dict[str, Any]:
         return {
             "specialist_name": self.specialist_name,
             "mission_role": self.mission_role,
@@ -42,9 +67,3 @@ class BooleanIshSpecialistResult:
             "kill_reasons": list(self.kill_reasons),
             "diagnostics": dict(self.diagnostics),
         }
-
-
-# Drop this into scannermodels.py near PairContext / other shared runtime models.
-# Intended flow:
-# Oracle -> PairContext -> specialist returns BooleanIshSpecialistResult
-# -> orchestrator builds candidate -> scanner converts candidate into OracleAction
