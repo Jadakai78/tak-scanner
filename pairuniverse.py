@@ -21,6 +21,9 @@ import numpy as np
 import pandas as pd
 import requests
 
+logger = logging.getLogger(__name__)
+logger.propagate = False
+
 KRAKEN_BASE = "https://api.kraken.com/0/public"
 ASSET_PAIRS_URL = f"{KRAKEN_BASE}/AssetPairs"
 OHLC_URL = f"{KRAKEN_BASE}/OHLC"
