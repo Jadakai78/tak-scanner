@@ -39,7 +39,7 @@ For migration safety, writers may also include `december_verdict` mirrored to `v
 
 To prevent partial reads/corruption during concurrent scanner + server access:
 
-1. Write JSON to a temp file in the same directory (for example, `signal_bus.json.tmp`).
+1. Write JSON to a unique temp file in the same directory (for example, `signal_bus.json.tmp.<pid>` or `signal_bus.json.tmp.<timestamp>`).
 2. `fsync` temp file if available in your runtime.
 3. Rename temp file over `/app/data/signal_bus.json` (atomic replace on same filesystem).
 
