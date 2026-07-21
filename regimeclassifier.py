@@ -28,11 +28,8 @@ try:
 except ImportError:  # pragma: no cover - sklearn is a declared dependency
     _SKLEARN_AVAILABLE = False
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s | %(name)s | %(levelname)s | %(message)s",
-)
-logger = logging.getLogger("regime_classifier")
+logger = logging.getLogger(__name__)
+logger.propagate = False
 
 MODULE_DIR = Path(__file__).resolve().parent
 MODELS_DIR = MODULE_DIR / "models"
