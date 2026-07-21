@@ -7,3 +7,5 @@ numpy
 scikit-learn
 krakenex
 pydantic>=2,<3
+fastapi
+uvicorn[standard]
