@@ -29,7 +29,7 @@ For migration safety, writers may also include `december_verdict` mirrored to `v
 ## Timestamp and score rules
 
 - Use ISO-8601 UTC timestamps (`YYYY-MM-DDTHH:MM:SS.sss+00:00` or `...Z`).
-- `score` should be percent-style (`0..100`) for canonical writes.
+- `score` should be percent-style (`0-100` inclusive) for canonical writes.
 - Reader compatibility in server supports legacy forms:
   - conviction from `score | conviction | final_conviction | confidence`.
   - verdict from `december_verdict | verdict | status | state`.
