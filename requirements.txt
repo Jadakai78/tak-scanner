@@ -6,3 +6,4 @@ gunicorn
 numpy
 scikit-learn
 krakenex
+pydantic>=2,<3
