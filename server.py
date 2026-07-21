@@ -1,5 +1,5 @@
 # server.py — JHL Holdings live signal API + terminal feed server (Railway-only)
-from flask import Flask, jsonify, send_file, redirect
+from flask import Flask, jsonify, send_file
 from flask_cors import CORS
 import json
 import threading
@@ -111,6 +111,22 @@ def _norm_verdict(sig: dict) -> str:
 def _norm_fired_at(sig: dict) -> str:
     return sig.get("fired_at") or sig.get("created_at") or sig.get("ts") or sig.get("timestamp") or ""
 
+def _norm_last_scan(data: dict) -> str:
+    # Prefer canonical key first, then legacy aliases from older writers.
+    oracle = data.get("oracle") or {}
+    tak = data.get("tak") or {}
+    return (
+        data.get("last_scan")
+        or data.get("lastscan")
+        or data.get("scan_ts")
+        or data.get("timestamp")
+        or oracle.get("last_scan")
+        or oracle.get("lastscan")
+        or tak.get("last_scan")
+        or tak.get("lastscan")
+        or ""
+    )
+
 def _norm_trap_risk(sig: dict) -> float:
     try:
         return float(sig.get("trap_risk", sig.get("trap_score", 0)) or 0)
@@ -208,11 +224,7 @@ ACCOUNTS = [
 def load_signal_bus():
     data = _read_bus()
 
-    data["last_scan"] = (
-        data.get("lastscan")
-        or data.get("last_scan")
-        or (data.get("tak") or {}).get("lastscan")
-    )
+    data["last_scan"] = _norm_last_scan(data)
 
     signals = data.get("signals") or []
     for s in signals:
