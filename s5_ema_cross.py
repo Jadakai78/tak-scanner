@@ -40,12 +40,23 @@ class S5EMACross:
         self,
         pair: str = None,
         ohlc_df: pd.DataFrame = None,
-        regime: str = "TREND_UP",
+        regime: str = "RANGE",
         fg_score: int = 50,
-        ai_st: Optional[Dict[str, Any]] = None,
-        context=None,
-        shared_state=None,
+        aist: Optional[Dict[str, Any]] = None,
+        context=None,           # NEW
+        shared_state=None,      # NEW
     ) -> Optional[Dict[str, Any]]:
+        """..."""
+    
+    # ── Unpack PairContext when called by orchestrator ─────────────────────
+    if context is not None:
+        pair     = getattr(context, "pair", pair)
+        ohlc_df  = getattr(context, "ohlc_df", ohlc_df)
+        regime   = getattr(context, "market_regime", regime) or regime
+        fg_score = getattr(context, "fg_score", fg_score) or fg_score
+        aist     = getattr(context, "ai_state", aist)
+    
+    # ... rest of the function unchanged
         """Generate an S5 signal for a fresh EMA cross trend continuation.
 
         Args:
