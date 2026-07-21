@@ -2,6 +2,28 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
+from dataclasses import dataclass, field
+from typing import Dict, List, Literal, Optional
+
+SpecialistActionBias = Literal["signal", "caution", "kill", "flat"]
+
+@dataclass
+class BooleanIshSpecialistResult:
+    specialist_name: str
+    mission_role: str
+    pair: str
+    claim: bool
+    action_bias: SpecialistActionBias
+    setup_family: Optional[str] = None
+    side: Optional[str] = None
+    why_now: str = ""
+    boolean_flags: Dict[str, bool] = field(default_factory=dict)
+    offense_score: float = 0.0
+    defense_score: float = 0.0
+    trap_score: float = 0.0
+    warnings: List[str] = field(default_factory=list)
+    kill_reasons: List[str] = field(default_factory=list)
+    diagnostics: Dict[str, str] = field(default_factory=dict)
 
 
 JsonDict = Dict[str, Any]
