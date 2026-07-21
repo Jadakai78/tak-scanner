@@ -19,7 +19,7 @@ Each signal written to `signals[]` should include:
 - `pair` (string) — market pair symbol (example: `BTCUSD`).
 - `engine` (string) — engine/source name.
 - `bias` (string) — directional bias.
-- `score` (number) — conviction score (preferred canonical score key).
+- `score` (number) — conviction score (preferred canonical score key, `0-100` inclusive).
 - `trap_risk` (number) — trap risk score.
 - `fired_at` (string) — signal fired timestamp (ISO-8601 UTC).
 - `verdict` (string) — one of `PENDING|CONFIRM|WAIT|REJECT|EXPIRED`.
@@ -39,7 +39,7 @@ For migration safety, writers may also include `december_verdict` mirrored to `v
 
 To prevent partial reads/corruption during concurrent scanner + server access:
 
-1. Write JSON to a unique temp file in the same directory (for example, `signal_bus.json.tmp.<pid>` or `signal_bus.json.tmp.<timestamp>`).
+1. Write JSON to a unique temp file in the same directory (for example, `signal_bus.json.tmp.<pid>`, `signal_bus.json.tmp.<timestamp-us>`, or `signal_bus.json.tmp.<uuid>`).
 2. `fsync` temp file if available in your runtime.
 3. Rename temp file over `/app/data/signal_bus.json` (atomic replace on same filesystem).
 
