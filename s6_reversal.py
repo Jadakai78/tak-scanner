@@ -39,14 +39,27 @@ class S6Reversal:
     ENGINE = "S6"
     REQUIRED_REGIMES = ["RANGE", "FEAR", "TREND_DOWN"]
 
-    def generate(
+def generate(
         self,
-        pair: str,
-        ohlc_df: pd.DataFrame,
-        regime: str,
-        fg_score: int,
+        pair: str = None,
+        ohlc_df: pd.DataFrame = None,
+        regime: str = "RANGE",
+        fg_score: int = 50,
         aist: Optional[Dict[str, Any]] = None,
+        context=None,           # NEW
+        shared_state=None,      # NEW
     ) -> Optional[Dict[str, Any]]:
+        """..."""
+    
+    # ── Unpack PairContext when called by orchestrator ─────────────────────
+    if context is not None:
+        pair     = getattr(context, "pair", pair)
+        ohlc_df  = getattr(context, "ohlc_df", ohlc_df)
+        regime   = getattr(context, "market_regime", regime) or regime
+        fg_score = getattr(context, "fg_score", fg_score) or fg_score
+        aist     = getattr(context, "ai_state", aist)
+    
+    # ... rest of the function unchanged
         """Detect a reversal candle at a key level with a SuperTrend flip.
 
         Args:
