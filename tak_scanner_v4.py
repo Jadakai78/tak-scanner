@@ -86,11 +86,11 @@ class TakScannerV4:
             registry = SpecialistRegistry.from_engine_map(ENGINE_CLASSES, REGIME_ENGINES)
         except Exception:
             registry = SpecialistRegistry()
-        try:
-            registry = registry.from_engine_map(ENGINE_CLASSES, REGIME_ENGINES)
-        except Exception as e:
-            logger.exception("Failed to build SpecialistRegistry from engine map: %s", e)
-            registry = SpecialistRegistry()
+            try:
+                registry = registry.from_engine_map(ENGINE_CLASSES, REGIME_ENGINES)
+            except Exception as e:
+                logger.exception("Failed to build SpecialistRegistry from engine map: %s", e)
+                registry = SpecialistRegistry()
 
         self.orchestrator = ScannerOrchestrator(specialist_registry=registry)
 
@@ -112,38 +112,23 @@ class TakScannerV4:
             logger.warning("FG fetch failed: %s", e)
             return 50
 
-    def _extract_symbol(self, item: Any) -> Optional[str]:
-        if isinstance(item, str):
-            return item
-        if isinstance(item, dict):
-            symbol = item.get("pair") or item.get("symbol") or item.get("altname") or item.get("wsname")
-            if isinstance(symbol, str):
-                return symbol
-        return None
-
     def run_scan(self) -> Dict[str, Any]:
         now = datetime.now(timezone.utc)
         logger.info("Starting Oracle-first scan at %s", now.isoformat())
 
         fg = self.fetch_fear_greed()
         fg_score = fg
-        raw_active
+        active = self.universe.get_active_pairs()
         dead_count = max(len(getattr(self.universe, "pairs", [])) - len(active), 0)
 
         regime_map: Dict[str, str] = {}
         contexts: List[PairContext] = []
 
-        logger.info("Props filter kept %s of %s active pairs", len(active), len(raw_active))
         logger.info("Oracle building contexts for %s active pairs", len(active))
-
-        for pair in active:
-            try:
-                ohlc_df = self.universe.fetch_ohlc(pair, interval=240)
-                regime = self.classifier.classify(pair, ohlc_df, fg_score)
-            except Exception as e:
-                logger.warning("Skipping %s due to regime prep failure: %s", pair, e)
-                continue
-
+        for pair_item in active:
+            pair = pair_item["pair"] if isinstance(pair_item, dict) else pair_item
+            ohlc_df = self.universe.fetch_ohlc(pair, interval=240)
+            regime = self.classifier.classify(pair, ohlc_df, fg_score)
             regime_map[pair] = regime
             contexts.append(
                 PairContext(
@@ -201,17 +186,12 @@ class TakScannerV4:
             )
         )
 
-        filtered_actions = [
-            a for a in oracle_actions
-            if a.action != "signal" or float(a.score or 0.0) >= 0.70
-        ]
+        filtered_actions = [a for a in oracle_actions if a.action != "signal" or float(a.score or 0.0) >= 0.70]
 
         summary = OracleSummary(
             fg=fg,
             fg_label=self._fg_label(fg),
-            market_phase=self._market_phase(
-                fg, len([a for a in filtered_actions if a.action == "signal"])
-            ),
+            market_phase=self._market_phase(fg, len([a for a in filtered_actions if a.action == "signal"])),
             session=self._get_session(now),
             regime_summary=self._regime_summary(fg, regime_map, filtered_actions),
             active_pairs=len(active),
@@ -236,6 +216,7 @@ class TakScannerV4:
             positions=[],
             health=health,
         )
+
         payload = payload_obj.to_dict()
 
         payload["lastscan"] = payload["last_scan"]
