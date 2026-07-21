@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import json
 import logging
+from collections import Counter
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 import pandas as pd
 import requests
@@ -56,10 +57,10 @@ INTENT_RANK = {
     "B_DELTA": 5,
     "STARTER_DELTA": 6,
 }
+
 MAX_SAMMY_ALERTS = 5
 SIGNAL_TTL_HOURS = 48
 BUS_PATH = Path("/app/data/signal_bus.json") if Path("/app/data").exists() else MODULE_DIR / "signal_bus.json"
-OHLC_COLUMNS = ["time", "open", "high", "low", "close", "vwap", "volume", "count"]
 
 
 def write_bus_snapshot(payload: Dict[str, Any], output_path: Path) -> None:
@@ -112,85 +113,47 @@ class TakScannerV4:
             logger.warning("FG fetch failed: %s", e)
             return 50
 
-    def _extract_symbol(self, item: Any) -> Optional[str]:
-        if isinstance(item, str):
-            return item
-        if isinstance(item, dict):
-            symbol = item.get("pair") or item.get("symbol") or item.get("altname") or item.get("wsname")
-            if isinstance(symbol, str):
-                return symbol
-        symbol = getattr(item, "pair", None) or getattr(item, "symbol", None)
-        if isinstance(symbol, str):
-            return symbol
-        return None
-
-    def _extract_ohlc_df(self, item: Any, pair: str) -> Optional[pd.DataFrame]:
-        if isinstance(item, dict):
-            rows = item.get("ohlc_4h") or item.get("ohlc") or []
-            if rows:
-                try:
-                    df = pd.DataFrame(rows, columns=OHLC_COLUMNS[: len(rows[0])] if isinstance(rows[0], (list, tuple)) else None)
-                    rename_map = {}
-                    if "c" in df.columns and "close" not in df.columns:
-                        rename_map["c"] = "close"
-                    if "o" in df.columns and "open" not in df.columns:
-                        rename_map["o"] = "open"
-                    if "h" in df.columns and "high" not in df.columns:
-                        rename_map["h"] = "high"
-                    if "l" in df.columns and "low" not in df.columns:
-                        rename_map["l"] = "low"
-                    if "v" in df.columns and "volume" not in df.columns:
-                        rename_map["v"] = "volume"
-                    if rename_map:
-                        df = df.rename(columns=rename_map)
-                    required = ["open", "high", "low", "close", "volume"]
-                    if all(col in df.columns for col in required):
-                        for col in [c for c in ["time", "open", "high", "low", "close", "vwap", "volume"] if c in df.columns]:
-                            df[col] = pd.to_numeric(df[col], errors="coerce")
-                        return df.dropna().reset_index(drop=True)
-                except Exception:
-                    logger.debug("Failed to build embedded OHLC for %s", pair)
-
-        try:
-            return self.universe.fetch_ohlc(pair, interval=240)
-        except Exception as e:
-            logger.warning("OHLC fetch failed for %s: %s", pair, e)
-            return None
-
     def run_scan(self) -> Dict[str, Any]:
         now = datetime.now(timezone.utc)
         logger.info("Starting Oracle-first scan at %s", now.isoformat())
 
         fg = self.fetch_fear_greed()
         fg_score = fg
+
         raw_active = self.universe.get_active_pairs()
-
-        active_items: List[Any] = []
-        for item in raw_active:
-            symbol = self._extract_symbol(item)
-            if symbol in PROPS_PAIRS:
-                active_items.append(item)
-
-        dead_count = max(len(getattr(self.universe, "pairs", [])) - len(active_items), 0)
+        active = [
+            item for item in raw_active
+            if isinstance(item, dict) and item.get("pair") in PROPS_PAIRS
+        ]
+        dead_count = max(len(raw_active) - len(active), 0)
 
         regime_map: Dict[str, str] = {}
         contexts: List[PairContext] = []
 
-        logger.info("Props filter kept %s of %s active pairs", len(active_items), len(raw_active))
-        logger.info("Oracle building contexts for %s active pairs", len(active_items))
+        logger.info("Props filter kept %s of %s active pairs", len(active), len(raw_active))
+        logger.info("Oracle building contexts for %s active pairs", len(active))
 
-        for item in active_items:
-            pair = self._extract_symbol(item)
+        for item in active:
+            pair = item.get("pair")
+            rows = item.get("ohlc_4h", [])
+
             if not pair:
                 logger.warning("Skipping active item with no pair: %s", item)
                 continue
-
-            ohlc_df = self._extract_ohlc_df(item, pair)
-            if ohlc_df is None or ohlc_df.empty:
-                logger.warning("Skipping %s due to missing OHLC", pair)
+            if not rows:
+                logger.warning("Skipping %s due to missing ohlc_4h", pair)
                 continue
 
             try:
+                ohlc_df = pd.DataFrame(
+                    rows,
+                    columns=["time", "open", "high", "low", "close", "vwap", "volume", "count"],
+                )
+                for col in ["open", "high", "low", "close", "vwap", "volume"]:
+                    ohlc_df[col] = pd.to_numeric(ohlc_df[col], errors="coerce")
+                ohlc_df["time"] = pd.to_numeric(ohlc_df["time"], errors="coerce")
+                ohlc_df = ohlc_df.dropna().reset_index(drop=True)
+
                 regime = self.classifier.classify(pair, ohlc_df, fg_score)
             except Exception as e:
                 logger.warning("Skipping %s due to regime prep failure: %s", pair, e)
@@ -208,6 +171,9 @@ class TakScannerV4:
                     market_state={},
                 )
             )
+
+        regime_counts = dict(Counter(regime_map.values()))
+        logger.info("Regime counts: %s", regime_counts)
 
         shared_state = {"fgscore": fg, "timeframe": "1h"}
         logger.info("Oracle calling orchestrator with %s contexts", len(contexts))
@@ -253,7 +219,11 @@ class TakScannerV4:
             )
         )
 
-        filtered_actions = [a for a in oracle_actions if a.action != "signal" or float(a.score or 0.0) >= 0.70]
+        filtered_actions = [
+            a for a in oracle_actions
+            if a.action != "signal" or float(a.score or 0.0) >= 0.70
+        ]
+
         fg_obj = {"score": fg, "label": self._fg_label(fg)}
 
         summary = OracleSummary(
@@ -262,7 +232,7 @@ class TakScannerV4:
             market_phase=self._market_phase(fg, len([a for a in filtered_actions if a.action == "signal"])),
             session=self._get_session(now),
             regime_summary=self._regime_summary(fg, regime_map, filtered_actions),
-            active_pairs=len(active_items),
+            active_pairs=len(active),
             dead_pairs=dead_count,
             scan_mode="scheduled",
         )
@@ -286,18 +256,19 @@ class TakScannerV4:
         )
 
         payload = payload_obj.to_dict()
+
         payload["lastscan"] = payload["last_scan"]
         payload["nextscan"] = payload["next_scan"]
         payload["fg"] = fg_obj
         payload["f_g"] = fg_obj
-        payload["activepairs"] = len(active_items)
-        payload["active_pairs"] = len(active_items)
+        payload["activepairs"] = len(active)
+        payload["active_pairs"] = len(active)
         payload["deadpairs"] = dead_count
         payload["dead_pairs"] = dead_count
         payload["regimemap"] = regime_map
         payload["regime_map"] = regime_map
         payload["sessionstats"] = {
-            "scanned": len(active_items),
+            "scanned": len(active),
             "actions": len(filtered_actions),
             "signals": len(payload.get("signals", [])),
             "killed": len(payload.get("killedsignals", [])),
