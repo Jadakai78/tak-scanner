@@ -21,12 +21,6 @@ import numpy as np
 import pandas as pd
 import requests
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s | %(name)s | %(levelname)s | %(message)s",
-)
-logger = logging.getLogger("pair_universe")
-
 KRAKEN_BASE = "https://api.kraken.com/0/public"
 ASSET_PAIRS_URL = f"{KRAKEN_BASE}/AssetPairs"
 OHLC_URL = f"{KRAKEN_BASE}/OHLC"
