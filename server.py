@@ -112,6 +112,7 @@ def _norm_fired_at(sig: dict) -> str:
     return sig.get("fired_at") or sig.get("created_at") or sig.get("ts") or sig.get("timestamp") or ""
 
 def _norm_last_scan(data: dict) -> str:
+    # Prefer canonical key first, then legacy aliases from older writers.
     oracle = data.get("oracle") or {}
     tak = data.get("tak") or {}
     return (
