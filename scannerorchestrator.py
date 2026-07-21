@@ -8,8 +8,8 @@ from scannermodels import CandidateSignal, PairContext, SpecialistObservation
 from scannercouncil import ScannerCouncil
 from scannerreviewer_remi import RemiReviewer
 
-logger = logging.getLogger("scannerorchestrator")
-
+logger = logging.getLogger(__name__)
+logger.propagate = False
 
 class ScannerOrchestrator:
     def __init__(
