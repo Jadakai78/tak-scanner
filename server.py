@@ -3,8 +3,6 @@ from flask import Flask, jsonify, send_file, redirect
 from flask_cors import CORS
 import json
 import threading
-import importlib
-import sys
 from pathlib import Path
 from datetime import datetime, timezone
 
@@ -76,10 +74,8 @@ _monitor_thread = threading.Thread(target=_start_position_monitor, daemon=True, 
 _monitor_thread.start()
 
 # ── Signal aging daemon ───────────────────────────────────────────────────────
-# ── Signal aging — auto-expire stale PENDING signals ────────────────────────
 # Runs every 5 minutes. Removes PENDING signals whose conviction dropped
-# below 68 OR whose trap_risk crept to ≥0.65 since they were written.
-# CONFIRM signals are never touched here — position_monitor owns those.
+# below floor OR whose trap_risk crossed gate OR aged out.
 
 import logging as _logging
 _aging_logger = _logging.getLogger("signal_aging")
@@ -88,6 +84,84 @@ AGING_INTERVAL   = 300   # seconds between aging passes
 AGING_CONV_FLOOR = 68.0  # conviction floor for PENDING signals
 AGING_TRAP_GATE  = 0.65  # trap ceiling for PENDING signals
 AGING_MAX_AGE    = 600   # 10 min max lifetime for an unactioned PENDING signal
+
+
+# ── Schema compatibility helpers (old/new signal formats) ───────────────────
+def _norm_conviction_pct(sig: dict) -> float:
+    """
+    Canonical conviction in percent [0..100].
+    Supports mixed schemas:
+      - score (often already percent)
+      - conviction / final_conviction (legacy; may be 0..1 or 0..100)
+      - confidence (0..1)
+    """
+    raw = None
+    for k in ("score", "conviction", "final_conviction"):
+        if sig.get(k) is not None:
+            raw = sig.get(k)
+            break
+    if raw is None and sig.get("confidence") is not None:
+        raw = sig.get("confidence")
+
+    try:
+        x = float(raw) if raw is not None else 100.0
+    except Exception:
+        return 100.0
+
+    return x * 100.0 if x <= 1.0 else x
+
+
+def _norm_verdict(sig: dict) -> str:
+    """
+    Canonical verdict across schemas.
+    """
+    raw = (
+        sig.get("december_verdict")
+        or sig.get("verdict")
+        or sig.get("status")
+        or sig.get("state")
+        or "PENDING"
+    )
+    v = str(raw).upper().strip()
+    aliases = {
+        "EXECUTED": "CONFIRM",
+        "APPROVED": "CONFIRM",
+        "HOLD": "WAIT",
+        "DENY": "REJECT",
+        "KILLED": "REJECT",
+    }
+    return aliases.get(v, v if v in {"PENDING", "CONFIRM", "WAIT", "REJECT", "EXPIRED"} else "PENDING")
+
+
+def _norm_fired_at(sig: dict) -> str:
+    """
+    Canonical timestamp for age checks.
+    """
+    return (
+        sig.get("fired_at")
+        or sig.get("created_at")
+        or sig.get("ts")
+        or sig.get("timestamp")
+        or ""
+    )
+
+
+def _norm_trap_risk(sig: dict) -> float:
+    try:
+        return float(sig.get("trap_risk", sig.get("trap_score", 0)) or 0)
+    except Exception:
+        return 0.0
+
+
+def _normalize_signal_inplace(sig: dict) -> dict:
+    """
+    Add canonical compatibility fields while preserving original schema.
+    """
+    sig["_conviction_pct"] = _norm_conviction_pct(sig)
+    sig["_verdict"] = _norm_verdict(sig)
+    sig["_fired_at"] = _norm_fired_at(sig)
+    sig["_trap_risk"] = _norm_trap_risk(sig)
+    return sig
 
 
 def _signal_aging_loop():
@@ -115,29 +189,28 @@ def _run_signal_aging():
     removed = []
 
     for sig in signals_in:
-        verdict = sig.get("december_verdict", "PENDING")
+        _normalize_signal_inplace(sig)
+        verdict = sig["_verdict"]
 
         # Never touch CONFIRM or WAIT — position_monitor owns CONFIRM, human owns WAIT
         if verdict in ("CONFIRM", "WAIT"):
             signals_out.append(sig)
             continue
 
-        # REJECT — already dead, keep for history but don't prune here
-        if verdict == "REJECT":
+        # REJECT/EXPIRED — already dead/inactive, keep for history
+        if verdict in ("REJECT", "EXPIRED"):
             signals_out.append(sig)
             continue
 
         # PENDING — check conviction + trap + age
-        raw_conv  = float(sig.get("conviction", sig.get("final_conviction", 100)) or 100)
-        conv      = raw_conv * 100 if raw_conv <= 1.0 else raw_conv
-        trap_risk = float(sig.get("trap_risk", sig.get("trap_score", 0)) or 0)
+        conv = sig["_conviction_pct"]
+        trap_risk = sig["_trap_risk"]
 
-        # Age check
-        fired_at_str = sig.get("fired_at", "")
-        age_seconds  = 9999
+        fired_at_str = sig["_fired_at"]
+        age_seconds = 9999
         if fired_at_str:
             try:
-                fired_at = datetime.fromisoformat(fired_at_str.replace("Z", "+00:00"))
+                fired_at = datetime.fromisoformat(str(fired_at_str).replace("Z", "+00:00"))
                 age_seconds = (now - fired_at).total_seconds()
             except Exception:
                 pass
@@ -151,12 +224,15 @@ def _run_signal_aging():
             reasons.append(f"age {int(age_seconds)}s>{AGING_MAX_AGE}s")
 
         if reasons:
-            pair = sig.get("pair","?")
+            pair = sig.get("pair", "?")
             _aging_logger.info("SIGNAL AGED OUT %s — %s", pair, " | ".join(reasons))
             removed.append(pair)
+            # Write both legacy and canonical-ish verdict fields
             sig["december_verdict"] = "EXPIRED"
-            sig["expired_at"]       = now.isoformat()
-            sig["expiry_reason"]    = " | ".join(reasons)
+            sig["verdict"] = "EXPIRED"
+            sig["expired_at"] = now.isoformat()
+            sig["expiry_reason"] = " | ".join(reasons)
+            sig["_verdict"] = "EXPIRED"
             signals_out.append(sig)
         else:
             signals_out.append(sig)
@@ -177,10 +253,11 @@ SIGNAL_BUS.parent.mkdir(parents=True, exist_ok=True)
 if not SIGNAL_BUS.exists():
     try:
         import urllib.request as _ur
-        with _ur.urlopen(f"https://giving-wisdom-production-9b27.up.railway.app/api/signals", timeout=8) as _r:
+        with _ur.urlopen("https://giving-wisdom-production-9b27.up.railway.app/api/signals", timeout=8) as _r:
             SIGNAL_BUS.write_bytes(_r.read())
     except Exception:
         pass
+
 CF_WORKER_URL = "https://giving-wisdom-production-9b27.up.railway.app"
 
 ACCOUNTS = [
@@ -234,37 +311,39 @@ def load_signal_bus():
     # -------------------------------------------------------------------------
 
     # ── Normalize top-level fields the frontend reads ────────────────────────
-
-    # last_scan: surface the first non-empty value from any key the scanner
-    # may have written it under, at the canonical root key.
     data["last_scan"] = (
         data.get("lastscan")
         or data.get("last_scan")
         or (data.get("tak") or {}).get("lastscan")
     )
 
-    # active_pairs: live count of signal cards the UI should show as actionable.
-    # Always recount from the array — never trust a cached scalar, because the
-    # aging daemon expires signals between scan cycles and any stored number
-    # goes stale immediately.
-    # `or []` guards against signals being explicitly set to null in the JSON.
+    # Canonicalize signals for mixed schema compatibility
     signals = data.get("signals") or []
+    for s in signals:
+        _normalize_signal_inplace(s)
+
+    # Actionable cards
     data["active_pairs"] = sum(
         1 for s in signals
-        if s.get("december_verdict", "PENDING") == "PENDING"
+        if s.get("_verdict", "PENDING") == "PENDING"
     )
 
-    # market_active_pairs: scanner universe count — how many pairs were active
-    # across the full market scan, independent of whether signals fired.
-    # Preserved separately so the UI can show "X of Y pairs firing" context.
+    # Scanner universe count
     data["market_active_pairs"] = (
         data.get("activepairs")
         or (data.get("oracle") or {}).get("activepairs")
         or 0
     )
 
-    # ── Deployment fingerprint — TEMPORARY, remove after confirming live ──────
-    data["_server_normalizer"] = "load_signal_bus_v2"
+    # Verdict counters for fast debugging
+    counts = {"PENDING": 0, "CONFIRM": 0, "WAIT": 0, "REJECT": 0, "EXPIRED": 0}
+    for s in signals:
+        v = s.get("_verdict", "PENDING")
+        counts[v] = counts.get(v, 0) + 1
+    data["_signal_verdict_counts"] = counts
+
+    # Deployment fingerprint
+    data["_server_normalizer"] = "load_signal_bus_v3_compat"
 
     # Inject account data
     baselines = data.get("session_baselines", {})
@@ -362,7 +441,7 @@ def _fetch_bus_from_kv() -> dict:
 
 def _push_verdict_to_kv(bus: dict):
     """Push updated bus (with verdict changes) back to CF KV so all services see it."""
-    import urllib.request, urllib.error
+    import urllib.request
     try:
         payload = json.dumps(bus, ensure_ascii=False, indent=2).encode("utf-8")
         req = urllib.request.Request(
@@ -375,15 +454,16 @@ def _push_verdict_to_kv(bus: dict):
             return resp.status == 200
     except Exception as _e:
         _aging_logger.warning("KV verdict push failed: %s", _e)
-        # ──             _aging_logger.warning so verdict survives CF being down ──
+        # Local fallback so verdict survives CF being down
         try:
             SIGNAL_BUS.write_bytes(json.dumps(bus, ensure_ascii=False, indent=2).encode())
         except Exception:
             pass
 
+
 @app.route("/api/position/execute", methods=["POST"])
 def position_execute():
-    """Human confirms an A-grade signal — flips december_verdict to CONFIRM."""
+    """Human confirms a signal — flips verdict to CONFIRM."""
     from flask import request as freq
     body = freq.get_json(silent=True) or {}
     pair      = body.get("pair", "")
@@ -397,9 +477,10 @@ def position_execute():
         updated = False
         for sig in bus.get("signals", []):
             if (sig.get("pair") == pair and
-                    (not bias   or sig.get("bias")     == bias) and
-                    (not engine or sig.get("engine")   == engine)):
+                    (not bias   or sig.get("bias")   == bias) and
+                    (not engine or sig.get("engine") == engine)):
                 sig["december_verdict"] = "CONFIRM"
+                sig["verdict"] = "CONFIRM"
                 sig["executed_at"] = datetime.now(timezone.utc).isoformat()
                 updated = True
         if updated:
@@ -430,6 +511,7 @@ def position_wait():
         for sig in bus.get("signals", []):
             if sig.get("pair") == pair:
                 sig["december_verdict"] = "WAIT"
+                sig["verdict"] = "WAIT"
                 sig["wait_at"] = datetime.now(timezone.utc).isoformat()
         SIGNAL_BUS.write_bytes(json.dumps(bus, ensure_ascii=False, indent=2).encode())
         _push_verdict_to_kv(bus)
@@ -440,10 +522,10 @@ def position_wait():
 
 @app.route("/api/position/reject", methods=["POST"])
 def position_reject():
-    """Human rejects a signal — flips december_verdict to REJECT."""
+    """Human rejects a signal — flips verdict to REJECT."""
     from flask import request as freq
     body = freq.get_json(silent=True) or {}
-    pair   = body.get("pair", "")
+    pair = body.get("pair", "")
     if not pair:
         return jsonify({"ok": False, "error": "pair required"}), 400
     try:
@@ -451,6 +533,7 @@ def position_reject():
         for sig in bus.get("signals", []):
             if sig.get("pair") == pair:
                 sig["december_verdict"] = "REJECT"
+                sig["verdict"] = "REJECT"
                 sig["rejected_at"] = datetime.now(timezone.utc).isoformat()
         SIGNAL_BUS.write_bytes(json.dumps(bus, ensure_ascii=False, indent=2).encode())
         _push_verdict_to_kv(bus)
@@ -520,7 +603,6 @@ def kraken_positions():
         })
     except Exception as exc:
         return jsonify({"error": str(exc)}), 500
-
 
 
 @app.route("/api/seed", methods=["POST", "GET"])
