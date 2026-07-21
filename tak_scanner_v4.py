@@ -106,6 +106,7 @@ class TakScannerV4:
         logger.info("Starting Oracle-first scan at %s", now.isoformat())
 
         fg = self.fetch_fear_greed()
+        fg_score = fg
         active = self.universe.get_active_pairs()
         dead_count = max(len(getattr(self.universe, "pairs", [])) - len(active), 0)
 
@@ -114,7 +115,8 @@ class TakScannerV4:
 
         logger.info("Oracle building contexts for %s active pairs", len(active))
         for pair in active:
-            regime = self.classifier.classify(pair)
+            ohlc_df = <real candles dataframe for this pair>
+            regime = self.classifier.classify(pair, ohlc_df, fg_score)
             regime_map[pair] = regime
             contexts.append(
                 PairContext(
