@@ -1,8 +1,8 @@
 """s1_sniper.py — S1 Tak/SMC Sniper engine.
 
 BOS retest + HTF bias + Ghost-Print volume + Order Block + FVG. Trades clean
-Smart-Money-Concept continuation in trending regimes only. Requires a 4/6 SMC
-score to emit a live signal.
+Smart-Money-Concept continuation in trending regimes only. Uses a 3/6 minimum
+SMC score to emit a live signal.
 """
 
 from __future__ import annotations
@@ -10,20 +10,34 @@ from __future__ import annotations
 import logging
 import sys
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
 import pandas as pd
 
 try:  # package import
     from ._common import (
-        atr, build_signal, candle_anatomy, detect_fvg, ema, rsi,
-        swing_highs, swing_lows, volume_ratio,
+        atr,
+        build_signal,
+        candle_anatomy,
+        detect_fvg,
+        ema,
+        rsi,
+        swing_highs,
+        swing_lows,
+        volume_ratio,
     )
 except ImportError:  # standalone execution
     sys.path.insert(0, str(Path(__file__).resolve().parent))
     from _common import (  # type: ignore
-        atr, build_signal, candle_anatomy, detect_fvg, ema, rsi,
-        swing_highs, swing_lows, volume_ratio,
+        atr,
+        build_signal,
+        candle_anatomy,
+        detect_fvg,
+        ema,
+        rsi,
+        swing_highs,
+        swing_lows,
+        volume_ratio,
     )
 
 logging.basicConfig(
@@ -48,27 +62,16 @@ class S1Sniper:
     ENGINE = "S1"
     REQUIRED_REGIMES = ["TREND_UP", "TREND_DOWN"]
 
-def generate(
-    self,
-    pair: str = None,
-    ohlc_df: pd.DataFrame = None,
-    regime: str = "RANGE",
-    fg_score: int = 50,
-    aist: Optional[Dict[str, Any]] = None,
-    context=None,           # NEW
-    shared_state=None,      # NEW
-) -> Optional[Dict[str, Any]]:
-    """..."""
-    
-    # ── Unpack PairContext when called by orchestrator ─────────────────────
-    if context is not None:
-        pair     = getattr(context, "pair", pair)
-        ohlc_df  = getattr(context, "ohlc_df", ohlc_df)
-        regime   = getattr(context, "market_regime", regime) or regime
-        fg_score = getattr(context, "fg_score", fg_score) or fg_score
-        aist     = getattr(context, "ai_state", aist)
-    
-    # ... rest of the function unchanged
+    def generate(
+        self,
+        pair: str = None,
+        ohlc_df: pd.DataFrame = None,
+        regime: str = "RANGE",
+        fg_score: int = 50,
+        aist: Optional[Dict[str, Any]] = None,
+        context=None,
+        shared_state=None,
+    ) -> Optional[Dict[str, Any]]:
         """Generate an S1 signal if a valid BOS-retest setup exists.
 
         Args:
@@ -76,13 +79,26 @@ def generate(
             ohlc_df: 4H OHLC DataFrame.
             regime: Classified regime (must be TREND_UP/TREND_DOWN).
             fg_score: Fear & Greed score.
-            ai_st: Optional AI-SuperTrend result (unused for detection here).
+            aist: Optional AI-SuperTrend result (unused for detection here).
+            context: Optional orchestrator PairContext.
+            shared_state: Optional shared orchestrator state.
 
         Returns:
             Partial signal dict or ``None``.
         """
+        # Unpack PairContext when called by orchestrator
+        if context is not None:
+            pair = getattr(context, "pair", pair)
+            ohlc_df = getattr(context, "ohlc_df", ohlc_df)
+            regime = getattr(context, "market_regime", regime) or regime
+            fg_score = getattr(context, "fg_score", fg_score) or fg_score
+            aist = getattr(context, "ai_state", aist)
+
         if regime not in self.REQUIRED_REGIMES:
             return None
+        if ohlc_df is None:
+            return None
+
         df = ohlc_df.reset_index(drop=True)
         if len(df) < 60:
             return None
@@ -120,8 +136,12 @@ def generate(
                 for j in range(bos_pivot + 1, len(df))
             )
             bos_index = next(
-                (j for j in range(bos_pivot + 1, len(df))
-                 if float(close.iloc[j]) > bos_level), None
+                (
+                    j
+                    for j in range(bos_pivot + 1, len(df))
+                    if float(close.iloc[j]) > bos_level
+                ),
+                None,
             )
         else:
             pivots = swing_lows(df)
@@ -134,8 +154,12 @@ def generate(
                 for j in range(bos_pivot + 1, len(df))
             )
             bos_index = next(
-                (j for j in range(bos_pivot + 1, len(df))
-                 if float(close.iloc[j]) < bos_level), None
+                (
+                    j
+                    for j in range(bos_pivot + 1, len(df))
+                    if float(close.iloc[j]) < bos_level
+                ),
+                None,
             )
 
         if not broke or bos_index is None:
@@ -173,10 +197,13 @@ def generate(
             "fvg": fvg_present,
         }
         smc_score = sum(1 for v in criteria.values() if v)
+
         # Tiered conviction bonus — more confluences = higher quality signal
         smc_bonus = {3: 0, 4: 5, 5: 12, 6: 20}.get(smc_score, 0)
         if smc_score < MIN_SMC_SCORE:
-            logger.debug("S1 %s SMC score %d/6 < %d — skip", pair, smc_score, MIN_SMC_SCORE)
+            logger.debug(
+                "S1 %s SMC score %d/6 < %d — skip", pair, smc_score, MIN_SMC_SCORE
+            )
             return None
 
         structure_quality = (
@@ -195,16 +222,27 @@ def generate(
             sl = (ob_high if ob_high is not None else last_high) * 1.001
             tp = self._next_structure(df, entry, bias)
 
+        # Keep smc_bonus computed for future scoring integration
+        _ = smc_bonus
+
         return build_signal(
-            pair=pair, bias=bias, engine=self.ENGINE, regime=regime,
-            entry=entry, sl=sl, tp=tp,
+            pair=pair,
+            bias=bias,
+            engine=self.ENGINE,
+            regime=regime,
+            entry=entry,
+            sl=sl,
+            tp=tp,
             structure_quality=structure_quality,
             rsi_val=float(rsi(close).iloc[-1]),
             vol_ratio=volume_ratio(df),
             fg_score=fg_score,
             kill_condition="close back through BOS level before fill",
-            extra={"smc_score": smc_score, "bos_level": round(bos_level, 8),
-                   "smc_criteria": criteria},
+            extra={
+                "smc_score": smc_score,
+                "bos_level": round(bos_level, 8),
+                "smc_criteria": criteria,
+            },
         )
 
     @staticmethod
@@ -233,6 +271,7 @@ def generate(
             highs = [float(df["high"].iloc[i]) for i in swing_highs(df)]
             targets = [h for h in highs if h > entry]
             return min(targets) if targets else entry * 1.03
+
         lows = [float(df["low"].iloc[i]) for i in swing_lows(df)]
         targets = [low for low in lows if low < entry]
         return max(targets) if targets else entry * 0.97
@@ -245,17 +284,21 @@ if __name__ == "__main__":
     logger.info("=== S1Sniper demo ===")
     pu = PairUniverse()
     eng = S1Sniper()
-    for sym, key, reg in [("BTC", "XXBTZUSD", "TREND_UP"),
-                          ("SOL", "SOLUSD", "TREND_DOWN"),
-                          ("XRP", "XRPUSD", "TREND_UP")]:
+    for sym, key, reg in [
+        ("BTC", "XXBTZUSD", "TREND_UP"),
+        ("SOL", "SOLUSD", "TREND_DOWN"),
+        ("XRP", "XRPUSD", "TREND_UP"),
+    ]:
         df = pu.fetch_ohlc(key, interval=240)
         if df is None:
             print(f"{sym}: fetch failed")
             continue
         sig = eng.generate(sym, df, reg, fg_score=30)
         if sig:
-            print(f"{sym}: {sig['bias']} entry={sig['entry']} sl={sig['sl']} "
-                  f"tp={sig['tp']} rr={sig['rr']} smc={sig.get('smc_score')} "
-                  f"struct={sig['structure_quality']}")
+            print(
+                f"{sym}: {sig['bias']} entry={sig['entry']} sl={sig['sl']} "
+                f"tp={sig['tp']} rr={sig['rr']} smc={sig.get('smc_score')} "
+                f"struct={sig['structure_quality']}"
+            )
         else:
             print(f"{sym}: no S1 setup in {reg}")
