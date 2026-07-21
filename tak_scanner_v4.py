@@ -112,239 +112,178 @@ class TakScannerV4:
             logger.warning("FG fetch failed: %s", e)
             return 50
 
-    def run_scan(self) -> Dict[str, Any]:
-        now = datetime.now(timezone.utc)
-        logger.info("Starting Oracle-first scan at %s", now.isoformat())
+   def run_scan(self) -> Dict[str, Any]:
+    now = datetime.now(timezone.utc)
+    logger.info("Starting Oracle-first scan at %s", now.isoformat())
 
-        fg = self.fetch_fear_greed()
-        fg_score = fg
-        active = self.universe.get_active_pairs()
-        dead_count = max(len(getattr(self.universe, "pairs", [])) - len(active), 0)
+    fg = self.fetch_fear_greed()
+    fg_score = fg
 
-        regime_map: Dict[str, str] = {}
-        contexts: List[PairContext] = []
+    raw_active = self.universe.get_active_pairs()
+    active = [
+        item for item in raw_active
+        if isinstance(item, dict) and item.get("pair") in PROPS_PAIRS
+    ]
+    dead_count = max(len(getattr(self.universe, "pairs", [])) - len(active), 0)
 
-        logger.info("Oracle building contexts for %s active pairs", len(active))
-        for pair_item in active:
-            pair = pair_item["pair"] if isinstance(pair_item, dict) else pair_item
-            ohlc_df = self.universe.fetch_ohlc(pair, interval=240)
-            regime = self.classifier.classify(pair, ohlc_df, fg_score)
-            regime_map[pair] = regime
-            contexts.append(
-                PairContext(
-                    pair=pair,
-                    market_regime=regime,
-                    timeframe="1h",
-                    fear_greed=fg,
-                    session=None,
-                    indicators={},
-                    market_state={},
-                )
-            )
+    regime_map: Dict[str, str] = {}
+    contexts: List[PairContext] = []
 
-        shared_state = {"fgscore": fg, "timeframe": "1h"}
-        logger.info("Oracle calling orchestrator with %s contexts", len(contexts))
-        candidates = self.orchestrator.run(contexts, shared_state)
-        logger.info("Oracle orchestrator returned %s candidates", len(candidates))
+    logger.info("Props filter kept %s of %s active pairs", len(active), len(raw_active))
+    logger.info("Oracle building contexts for %s active pairs", len(active))
 
-        oracle_actions = []
-        action_priority = {"signal": 0, "caution": 1, "kill": 2, "flat": 3}
+    for item in active:
+        pair = item.get("pair")
+        rows = item.get("ohlc_4h", [])
 
-        for candidate in candidates:
-            action_type = self._candidate_action(candidate)
-            reason = (getattr(candidate, "thesis", "") or "").strip() or "Oracle setup recognized"
+        if not pair:
+            logger.warning("Skipping active item with no pair: %s", item)
+            continue
+        if not rows:
+            logger.warning("Skipping %s due to missing ohlc_4h", pair)
+            continue
 
-            oracle_action = make_oracle_action(
-                pair=getattr(candidate, "pair", "UNKNOWN"),
-                action=action_type,
-                timestamp=now.isoformat(),
-                setup_family=getattr(candidate, "setup_type", None),
-                side=getattr(candidate, "side", None),
-                confidence=float(getattr(candidate, "confidence", 0.0) or 0.0),
-                score=float(getattr(candidate, "score", 0.0) or 0.0),
-                why_now=reason[:220],
-                entry_idea=getattr(candidate, "entry_idea", None),
-                stop_idea=getattr(candidate, "stop_idea", None),
-                target_idea=getattr(candidate, "target_idea", None),
-                tags=list(getattr(candidate, "tags", []) or []),
-                warnings=list(getattr(candidate, "warnings", []) or []),
-                context={
-                    "regime": regime_map.get(getattr(candidate, "pair", ""), "UNKNOWN"),
-                    "fg": fg,
-                    "specialist": getattr(candidate, "specialist", None),
-                    "intent": getattr(candidate, "intent", None),
-                    "grade": getattr(candidate, "grade", None),
-                },
-            )
-            oracle_actions.append(oracle_action)
-
-        oracle_actions.sort(
-            key=lambda a: (
-                action_priority.get(a.action, 99),
-                -float(a.score or 0.0),
-                -float(a.confidence or 0.0),
-            )
-        )
-
-        filtered_actions = [a for a in oracle_actions if a.action != "signal" or float(a.score or 0.0) >= 0.70]
-
-        summary = OracleSummary(
-            fg=fg,
-            fg_label=self._fg_label(fg),
-            market_phase=self._market_phase(fg, len([a for a in filtered_actions if a.action == "signal"])),
-            session=self._get_session(now),
-            regime_summary=self._regime_summary(fg, regime_map, filtered_actions),
-            active_pairs=len(active),
-            dead_pairs=dead_count,
-            scan_mode="scheduled",
-        )
-
-        health = OracleHealth(
-            scheduler_ok=True,
-            bus_ok=True,
-            publish_ok=True,
-            last_error=None,
-            source_path=str(self.bus.path),
-            heartbeat=now.isoformat(),
-        )
-
-        payload_obj: OraclePayload = payload_from_actions(
-            last_scan=now.isoformat(),
-            next_scan=self.next_scan_time(now).isoformat(),
-            oracle=summary,
-            actions=filtered_actions,
-            positions=[],
-            health=health,
-        )
-
-        payload = payload_obj.to_dict()
-
-        payload["lastscan"] = payload["last_scan"]
-        payload["nextscan"] = payload["next_scan"]
-        payload["fg"] = fg
-        payload["activepairs"] = len(active)
-        payload["deadpairs"] = dead_count
-        payload["regimemap"] = regime_map
-        payload["sessionstats"] = {
-            "scanned": len(active),
-            "actions": len(filtered_actions),
-            "signals": len(payload.get("signals", [])),
-            "killed": len(payload.get("killedsignals", [])),
-        }
-        payload["quiethours"] = now.hour not in SCAN_HOURS_UTC
-        payload["sprintmode"] = False
-
-        self._trim_last_signals()
-        self.last_signals = payload.get("signals", [])
-
-        write_bus_snapshot(payload, self.bus.path)
-        self.fire_alerts(payload.get("signals", [])[:MAX_SAMMY_ALERTS])
-
-        logger.info(
-            "Oracle scan complete: %s actions | %s signals | %s killed",
-            len(filtered_actions),
-            len(payload.get("signals", [])),
-            len(payload.get("killedsignals", [])),
-        )
-        return payload
-
-    def _candidate_action(self, candidate: Any) -> str:
-        council = getattr(candidate, "council", None)
-        review = getattr(candidate, "review", None)
-
-        if council is not None:
-            route = getattr(council, "route", None)
-            if route == "killed_signals":
-                return "kill"
-            if route == "caution_signals":
-                return "caution"
-
-        if review is not None:
-            decision = getattr(review, "decision", None)
-            if decision in {"reject", "kill", "drop"}:
-                return "kill"
-            if decision in {"caution", "watchlist", "wait"}:
-                return "caution"
-
-        return "signal"
-
-    def _trim_last_signals(self) -> None:
         try:
-            cutoff = datetime.now(timezone.utc) - timedelta(hours=SIGNAL_TTL_HOURS)
-            trimmed: List[Dict[str, Any]] = []
-            for signal in self.last_signals:
-                ts = signal.get("timestamp")
-                if not ts:
-                    continue
-                try:
-                    t = datetime.fromisoformat(ts)
-                    if t.tzinfo is None:
-                        t = t.replace(tzinfo=timezone.utc)
-                    if t >= cutoff:
-                        trimmed.append(signal)
-                except Exception:
-                    continue
-            self.last_signals = trimmed
-        except Exception:
-            logger.debug("Failed to trim last_signals")
+            ohlc_df = pd.DataFrame(
+                rows,
+                columns=["time", "open", "high", "low", "close", "vwap", "volume", "count"],
+            )
+            for col in ["open", "high", "low", "close", "vwap", "volume"]:
+                ohlc_df[col] = pd.to_numeric(ohlc_df[col], errors="coerce")
+            ohlc_df["time"] = pd.to_numeric(ohlc_df["time"], errors="coerce")
+            ohlc_df = ohlc_df.dropna().reset_index(drop=True)
 
-    def fire_alerts(self, top_signals: List[Dict[str, Any]]) -> None:
-        for signal in top_signals:
-            try:
-                message = format_gimba_message(signal)
-                logger.info("Alert fired for %s", signal.get("pair", "unknown"))
-                logger.debug("Alert payload preview: %s", message[:240])
-            except Exception as e:
-                logger.exception("Alert failed: %s", e)
+            regime = self.classifier.classify(pair, ohlc_df, fg_score)
+        except Exception as e:
+            logger.warning("Skipping %s due to regime prep failure: %s", pair, e)
+            continue
 
-    def _fg_label(self, fg: int) -> str:
-        if fg < 25:
-            return "Extreme Fear"
-        if fg < 45:
-            return "Fear"
-        if fg < 55:
-            return "Neutral"
-        if fg < 75:
-            return "Greed"
-        return "Extreme Greed"
+        regime_map[pair] = regime
+        contexts.append(
+            PairContext(
+                pair=pair,
+                market_regime=regime,
+                timeframe="1h",
+                fear_greed=fg,
+                session=None,
+                indicators={},
+                market_state={},
+            )
+        )
 
-    def _get_session(self, now: datetime) -> str:
-        hour = now.hour
-        if 0 <= hour < 8:
-            return "Asia"
-        if 8 <= hour < 16:
-            return "London"
-        return "NY"
+    shared_state = {"fgscore": fg, "timeframe": "1h"}
+    logger.info("Oracle calling orchestrator with %s contexts", len(contexts))
+    candidates = self.orchestrator.run(contexts, shared_state)
+    logger.info("Oracle orchestrator returned %s candidates", len(candidates))
 
-    def _market_phase(self, fg: int, signal_count: int) -> str:
-        if signal_count >= 10:
-            return "HOT"
-        if signal_count >= 5:
-            return "WARM"
-        if signal_count >= 1:
-            return "COLD"
-        if fg < 35:
-            return "FEAR"
-        return "DEAD"
+    oracle_actions = []
+    action_priority = {"signal": 0, "caution": 1, "kill": 2, "flat": 3}
 
-    def _regime_summary(self, fg: int, regime_map: Dict[str, str], actions: List[Any]) -> str:
-        if not actions:
-            if fg < 35:
-                return "Fear-heavy tape with no qualified Oracle actions"
-            return "Quiet tape with no qualified Oracle actions"
+    for candidate in candidates:
+        action_type = self._candidate_action(candidate)
+        reason = (getattr(candidate, "thesis", "") or "").strip() or "Oracle setup recognized"
 
-        regime_counts: Dict[str, int] = {}
-        for regime in regime_map.values():
-            regime_counts[regime] = regime_counts.get(regime, 0) + 1
+        oracle_action = make_oracle_action(
+            pair=getattr(candidate, "pair", "UNKNOWN"),
+            action=action_type,
+            timestamp=now.isoformat(),
+            setup_family=getattr(candidate, "setup_type", None),
+            side=getattr(candidate, "side", None),
+            confidence=float(getattr(candidate, "confidence", 0.0) or 0.0),
+            score=float(getattr(candidate, "score", 0.0) or 0.0),
+            why_now=reason[:220],
+            entry_idea=getattr(candidate, "entry_idea", None),
+            stop_idea=getattr(candidate, "stop_idea", None),
+            target_idea=getattr(candidate, "target_idea", None),
+            tags=list(getattr(candidate, "tags", []) or []),
+            warnings=list(getattr(candidate, "warnings", []) or []),
+            context={
+                "regime": regime_map.get(getattr(candidate, "pair", ""), "UNKNOWN"),
+                "fg": fg,
+                "specialist": getattr(candidate, "specialist", None),
+                "intent": getattr(candidate, "intent", None),
+                "grade": getattr(candidate, "grade", None),
+            },
+        )
+        oracle_actions.append(oracle_action)
 
-        top_regime = max(regime_counts, key=regime_counts.get) if regime_counts else "UNKNOWN"
-        signal_count = len([a for a in actions if getattr(a, "action", None) == "signal"])
-        caution_count = len([a for a in actions if getattr(a, "action", None) == "caution"])
+    oracle_actions.sort(
+        key=lambda a: (
+            action_priority.get(a.action, 99),
+            -float(a.score or 0.0),
+            -float(a.confidence or 0.0),
+        )
+    )
 
-        return f"{top_regime} dominant | FG {fg} | {signal_count} signals | {caution_count} cautions"
+    filtered_actions = [
+        a for a in oracle_actions
+        if a.action != "signal" or float(a.score or 0.0) >= 0.70
+    ]
 
+    fg_obj = {"score": fg, "label": self._fg_label(fg)}
 
-if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO)
-    scanner = TakScannerV4()
-    scanner.run_scan()
+    summary = OracleSummary(
+        fg=fg,
+        fg_label=fg_obj["label"],
+        market_phase=self._market_phase(fg, len([a for a in filtered_actions if a.action == "signal"])),
+        session=self._get_session(now),
+        regime_summary=self._regime_summary(fg, regime_map, filtered_actions),
+        active_pairs=len(active),
+        dead_pairs=dead_count,
+        scan_mode="scheduled",
+    )
+
+    health = OracleHealth(
+        scheduler_ok=True,
+        bus_ok=True,
+        publish_ok=True,
+        last_error=None,
+        source_path=str(self.bus.path),
+        heartbeat=now.isoformat(),
+    )
+
+    payload_obj: OraclePayload = payload_from_actions(
+        last_scan=now.isoformat(),
+        next_scan=self.next_scan_time(now).isoformat(),
+        oracle=summary,
+        actions=filtered_actions,
+        positions=[],
+        health=health,
+    )
+
+    payload = payload_obj.to_dict()
+
+    payload["lastscan"] = payload["last_scan"]
+    payload["nextscan"] = payload["next_scan"]
+    payload["fg"] = fg_obj
+    payload["f_g"] = fg_obj
+    payload["activepairs"] = len(active)
+    payload["active_pairs"] = len(active)
+    payload["deadpairs"] = dead_count
+    payload["dead_pairs"] = dead_count
+    payload["regimemap"] = regime_map
+    payload["regime_map"] = regime_map
+    payload["sessionstats"] = {
+        "scanned": len(active),
+        "actions": len(filtered_actions),
+        "signals": len(payload.get("signals", [])),
+        "killed": len(payload.get("killedsignals", [])),
+    }
+    payload["quiethours"] = now.hour not in SCAN_HOURS_UTC
+    payload["quiet_hours"] = payload["quiethours"]
+    payload["sprintmode"] = False
+    payload["sprint_mode"] = False
+
+    self._trim_last_signals()
+    self.last_signals = payload.get("signals", [])
+
+    write_bus_snapshot(payload, self.bus.path)
+    self.fire_alerts(payload.get("signals", [])[:MAX_SAMMY_ALERTS])
+
+    logger.info(
+        "Oracle scan complete: %s actions | %s signals | %s killed",
+        len(filtered_actions),
+        len(payload.get("signals", [])),
+        len(payload.get("killedsignals", [])),
+    )
+    return payload
