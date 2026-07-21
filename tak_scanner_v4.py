@@ -127,14 +127,7 @@ class TakScannerV4:
 
         fg = self.fetch_fear_greed()
         fg_score = fg
-        raw_active = self.universe.get_active_pairs()
-
-        active: List[str] = []
-        for item in raw_active:
-            symbol = self._extract_symbol(item)
-            if symbol in PROPS_PAIRS:
-                active.append(symbol)
-
+        raw_active
         dead_count = max(len(getattr(self.universe, "pairs", [])) - len(active), 0)
 
         regime_map: Dict[str, str] = {}
