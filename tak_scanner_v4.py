@@ -20,11 +20,13 @@ from gimba_formatter import format_gimba_message
 from scannermodels import PairContext
 from scannerorchestrator import ScannerOrchestrator
 from scannerspecialist_registry import SpecialistRegistry
-from oracle_schema import (
+from oracleschema import (
     OracleHealth,
-    OraclePanelPayload,
+    OraclePayload,
     OracleSummary,
+    payload_from_actions,
     make_oracle_action,
+    SEATS,
 )
 
 logger = logging.getLogger(__name__)
