@@ -19,7 +19,7 @@ from strategies import ENGINE_CLASSES, REGIME_ENGINES
 from gimba_formatter import format_gimba_message
 from scannermodels import PairContext
 from scannerorchestrator import ScannerOrchestrator
-from scannerspecialistregistry import SpecialistRegistry
+from scannerspecialist_registry import SpecialistRegistry
 from oracleschema import (
     OracleHealth,
     OraclePayload,
