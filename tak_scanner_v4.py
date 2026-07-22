@@ -20,7 +20,7 @@ from gimba_formatter import format_gimba_message
 from scannermodels import PairContext
 from scannerorchestrator import ScannerOrchestrator
 from scannerspecialist_registry import SpecialistRegistry
-from oracleschema import (
+from oracle_schema import (
     OracleHealth,
     OraclePayload,
     OracleSummary,
