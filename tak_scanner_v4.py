@@ -170,7 +170,7 @@ class TakScannerV4:
                 logger.warning("Regime classification failed for %s: %s", pair, e, exc_info=True)
                 regime = "UNKNOWN"
 
-    regimemap[pair] = regime
+            regimemap[pair] = regime
             contexts.append(
                 PairContext(
                     pair=pair,
