@@ -447,7 +447,7 @@ class ScannerOrchestrator:
             return result
 
         if isinstance(result, dict):
-            raw_context = dict(result.get("context", {}))
+            raw_context = dict(result.get("context") or {})
             raw_context.setdefault("pair", context.pair)
             raw_context.setdefault("timeframe", context.timeframe)
             raw_context.setdefault("market_regime", context.market_regime)
