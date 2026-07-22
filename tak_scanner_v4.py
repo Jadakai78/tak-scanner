@@ -161,15 +161,16 @@ class TakScannerV4:
 
         logger.info("Oracle building contexts for %s active pairs", len(active))
 
-        for pair in active:
+        for item in active:
+            pair = item["pair"]
             try:
-                ohlc_df = self.remi.get_ohlc_df(pair, timeframe="1h")
+                ohlc_df = item.get("df") or self.remi.get_ohlc_df(pair, timeframe="1h")
                 regime = self.classifier.classify(pair, ohlc_df, fg)
             except Exception as e:
-                logger.warning("Regime classification failed for %s: %s", pair, e)
+                logger.warning("Regime classification failed for %s: %s", pair, e, exc_info=True)
                 regime = "UNKNOWN"
 
-            regimemap[pair] = regime
+    regimemap[pair] = regime
             contexts.append(
                 PairContext(
                     pair=pair,
