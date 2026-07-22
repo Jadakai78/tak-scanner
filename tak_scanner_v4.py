@@ -22,7 +22,7 @@ from scannerorchestrator import ScannerOrchestrator
 from scannerspecialist_registry import SpecialistRegistry
 from oracle_schema import (
     OracleHealth,
-    OraclePayload,
+    OraclePanelPayload,   # <- changed
     OracleSummary,
     payload_from_actions,
     make_oracle_action,
@@ -112,11 +112,11 @@ class TakScannerV4:
         self.last_signals: List[Dict[str, Any]] = []
 
         try:
-            registry = SpecialistRegistry.from_engine_map(ENGINECLASSES, REGIMEENGINES)
+            registry = SpecialistRegistry.from_engine_map(ENGINE_CLASSES, REGIME_ENGINES)
         except Exception:
             registry = SpecialistRegistry()
             try:
-                registry = registry.from_engine_map(ENGINECLASSES, REGIMEENGINES)
+                registry = registry.from_engine_map(ENGINE_CLASSES, REGIME_ENGINES)
             except Exception as e:
                 logger.exception(
                     "Failed to build SpecialistRegistry from engine map: %s", e
@@ -243,7 +243,7 @@ class TakScannerV4:
             heartbeat=now.isoformat(),
         )
 
-        payload_obj = OraclePayload(
+        payload_obj = OraclePanelPayload(   # <- changed
             payload_from_actions(
                 last_scan=now.isoformat(),
                 next_scan=self.next_scan_time(now).isoformat(),
