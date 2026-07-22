@@ -180,8 +180,7 @@ class TakScannerV4:
                     session=None,
                     indicators=None,
                     market_state=None,
-                    shared_state=None,
-                )
+                 )
             )
 
         logger.info("Oracle calling orchestrator with %s contexts", len(contexts))
