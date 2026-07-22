@@ -22,11 +22,10 @@ from scannerorchestrator import ScannerOrchestrator
 from scannerspecialist_registry import SpecialistRegistry
 from oracle_schema import (
     OracleHealth,
-    OraclePayload,
+    OraclePanelPayload,
     OracleSummary,
     payload_from_actions,
     make_oracle_action,
-    SEATS,
 )
 
 logger = logging.getLogger(__name__)
