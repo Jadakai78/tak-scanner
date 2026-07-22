@@ -20,7 +20,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger("server")
 
-app = FastAPI(title="Oracle Signal API", version="1.0.0")
+app = FastAPI(title="Oracle Panel API", version="2.0.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -38,31 +38,49 @@ def _read_json(path: Path) -> Dict[str, Any]:
         return json.load(f)
 
 
-@app.get("/api/signals")
-async def get_signals() -> JSONResponse:
-    """Serve the latest Oracle payload with a last-good fallback.
-
-    Primary source: BUS_PATH written by scheduler/OracleRunner.
-    Fallback: LAST_GOOD_PATH if the primary read fails.
-    """
+def _load_payload() -> tuple[Dict[str, Any], str]:
     try:
         payload = _read_json(BUS_PATH)
-        source = "bus"
+        return payload, "bus"
     except Exception as e:
         logger.warning("Primary bus read failed: %s", e)
         try:
             payload = _read_json(LAST_GOOD_PATH)
-            source = "last_good"
+            return payload, "last_good"
         except Exception as e2:
             logger.error("Fallback last-good read failed: %s", e2)
-            raise HTTPException(status_code=503, detail="No signal payload available")
+            raise HTTPException(status_code=503, detail="No Oracle payload available")
 
+
+def _annotate_payload(payload: Dict[str, Any], source: str) -> Dict[str, Any]:
     payload.setdefault("api_source", source)
     payload.setdefault("api_served_at", datetime.utcnow().isoformat() + "Z")
+    return payload
 
+
+@app.get("/api/panel")
+async def get_panel() -> JSONResponse:
+    """Serve the latest Oracle panel payload with a last-good fallback."""
+    payload, source = _load_payload()
+    payload = _annotate_payload(payload, source)
+    return JSONResponse(payload)
+
+
+@app.get("/api/signals")
+async def get_signals_compat() -> JSONResponse:
+    """Compatibility alias for older clients; returns the same Oracle panel payload."""
+    payload, source = _load_payload()
+    payload = _annotate_payload(payload, source)
     return JSONResponse(payload)
 
 
 @app.get("/")
 async def root() -> Dict[str, Any]:
-    return {"status": "ok", "bus_path": str(BUS_PATH), "last_good_path": str(LAST_GOOD_PATH)}
+    return {
+        "status": "ok",
+        "service": "oracle-panel-api",
+        "bus_path": str(BUS_PATH),
+        "last_good_path": str(LAST_GOOD_PATH),
+        "primary_endpoint": "/api/panel",
+        "compat_endpoint": "/api/signals",
+    }
