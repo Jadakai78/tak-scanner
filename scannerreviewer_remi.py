@@ -1,12 +1,7 @@
 from __future__ import annotations
 
 from typing import List
-
 from scannermodels import CandidateSignal, ReviewResult
-from scannercandidate_factory import build_candidate
-from scannermodels import CandidateSignal, PairContext, SpecialistObservation
-from scannercouncil import ScannerCouncil
-from scannerreviewer_remi import RemiReviewer
 
 
 class RemiReviewer:
