@@ -170,7 +170,16 @@ class ScannerOrchestrator:
         for method_name in ("observe", "scan", "generate", "run"):
             method = getattr(specialist, method_name, None)
             if callable(method):
-                result = method(context=context, shared_state=shared_state)
+                # Normalize context for legacy specialists expecting dict-like access (.get)
+                if hasattr(context, "to_dict") and callable(getattr(context, "to_dict")):
+                    context_payload = context.to_dict()
+                elif hasattr(context, "__dict__"):
+                    # dataclass/object fallback
+                    context_payload = dict(vars(context))
+                else:
+                    context_payload = context
+
+                result = method(context=context_payload, shared_state=shared_state)
                 return self._normalize_observation(result, specialist, context)
         return None
 

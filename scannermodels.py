@@ -19,6 +19,19 @@ class PairContext:
     market_state: JsonDict = field(default_factory=dict)
     diagnostics: JsonDict = field(default_factory=dict)
 
+    def to_dict(self) -> JsonDict:
+        return {
+            "pair": self.pair,
+            "market_regime": self.market_regime,
+            "timeframe": self.timeframe,
+            "fear_greed": self.fear_greed,
+            "session": self.session,
+            "context": dict(self.context),
+            "indicators": dict(self.indicators),
+            "market_state": dict(self.market_state),
+            "diagnostics": dict(self.diagnostics),
+        }
+
 
 @dataclass
 class SpecialistObservation:
