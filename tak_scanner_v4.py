@@ -17,7 +17,7 @@ from remi import Remi
 from signalbus import SignalBus
 from strategies import ENGINE_CLASSES, REGIME_ENGINES
 from scannermodels import PairContext
-from scannerorchestrator import ScannerOrchestrator
+from scannerorchestrator import PanelStateRecord, ScannerOrchestrator
 from scannerspecialist_registry import SpecialistRegistry
 from oracle_schema import (
     OracleHealth,
@@ -169,15 +169,15 @@ class TakScannerV4:
 
         shared_state = {"fgscore": fg, "timeframe": "1h"}
         logger.info("Oracle calling orchestrator with %s contexts", len(contexts))
-        candidates = self.orchestrator.run(contexts, shared_state)
-        logger.info("Oracle orchestrator returned %s candidates", len(candidates))
+        panel_records = self.orchestrator.run(contexts, shared_state)
+        logger.info("Oracle orchestrator returned %s panel records", len(panel_records))
 
         opportunities: List[OraclePanelRow] = []
         watchlist: List[OraclePanelRow] = []
         killed: List[OraclePanelRow] = []
 
-        for candidate in candidates:
-            row = self._candidate_to_panel_row(candidate, regime_map, fg, now)
+        for record in panel_records:
+            row = self._panel_record_to_row(record, regime_map, fg, now)
             state = row.action_state
 
             if state == "actionable":
@@ -227,7 +227,7 @@ class TakScannerV4:
             market_phase=market_phase,
             regime_counts=regime_counts,
             htf_bias_overview=self._htf_bias_overview(opportunities, watchlist, killed),
-            notes=[self._regime_summary(fg, regime_map, candidates)],
+            notes=[self._regime_summary(fg, regime_map, panel_records)],
         )
 
         panel = OraclePanel(
@@ -266,6 +266,7 @@ class TakScannerV4:
             "opportunities": len(opportunities),
             "watchlist": len(watchlist),
             "killed": len(killed),
+            "dead_pairs_filtered_outside_props": dead_count,
         }
         payload["regime_map"] = regime_map
         payload["quiet_hours"] = now.hour not in SCAN_HOURS_UTC
@@ -284,86 +285,122 @@ class TakScannerV4:
         )
         return payload
 
-    def _candidate_to_panel_row(
+    def _panel_record_to_row(
         self,
-        candidate: Any,
+        record: PanelStateRecord,
         regime_map: Dict[str, str],
         fg: int,
         now: datetime,
     ) -> OraclePanelRow:
-        pair = getattr(candidate, "pair", "UNKNOWN")
-        action_type = self._candidate_action(candidate)
-        context = getattr(candidate, "context", {}) or {}
+        oracle_context = getattr(record, "oracle_context", {}) or {}
+        claims = list(getattr(record, "weapon_claims", []) or [])
+        lead_claim = claims[0] if claims else {}
 
+        board_state = str(getattr(record, "board_state", "wait") or "wait").lower()
         action_state = {
-            "signal": "actionable",
+            "execute": "actionable",
             "caution": "watch",
-            "kill": "killed",
-        }.get(action_type, "info")
+            "wait": "watch",
+            "dead": "killed",
+        }.get(board_state, "watch")
 
-        side = str(getattr(candidate, "side", "neutral") or "neutral").lower()
-        why_now = (getattr(candidate, "thesis", "") or "").strip() or "Oracle setup recognized"
+        pair = getattr(record, "pair", "UNKNOWN")
+        side = str(getattr(record, "side", "neutral") or "neutral").lower()
+        score = float(getattr(record, "score", 0.0) or 0.0)
+        confidence = float(getattr(record, "confidence", 0.0) or 0.0)
+        trap_score = self._trap_score_from_record(record, claims)
+        offense_score = float(lead_claim.get("score", score) or score)
+        defense_score = max(0.0, round(confidence - trap_score, 4))
 
-        score = float(getattr(candidate, "score", 0.0) or 0.0)
-        confidence = float(getattr(candidate, "confidence", 0.0) or 0.0)
+        warnings = list(getattr(record, "warnings", []) or [])
+        tags = list(getattr(record, "tags", []) or [])
 
-        offense_score = float(context.get("offense_score", score) or 0.0)
-        defense_score = float(context.get("defense_score", confidence) or 0.0)
-        trap_score = float(context.get("trap_score", 0.0) or 0.0)
-
-        review = getattr(candidate, "review", None)
-        council = getattr(candidate, "council", None)
-
-        warnings = list(getattr(candidate, "warnings", []) or [])
-        kill_reasons = list(context.get("kill_reasons", []) or [])
-
-        if action_state == "killed" and not kill_reasons:
-            review_decision = getattr(review, "decision", None)
-            council_route = getattr(council, "route", None)
-            if review_decision:
-                kill_reasons.append(str(review_decision))
-            elif council_route:
-                kill_reasons.append(str(council_route))
-            else:
-                kill_reasons.append("disqualified")
+        kill_reasons = []
+        if action_state == "killed":
+            kill_reasons.append(getattr(record, "trap_state", None) or "dead_panel_state")
 
         return OraclePanelRow(
             pair=pair,
             panel_rank=0,
             action_state=action_state,
             side=side,
-            setup_family=getattr(candidate, "setup_type", None),
-            specialist=getattr(candidate, "specialist", None),
-            regime=regime_map.get(pair, "UNKNOWN"),
-            htf_bias=context.get("htf_bias"),
-            htf_alignment=context.get("htf_alignment"),
+            setup_family=lead_claim.get("setup_type"),
+            specialist=getattr(record, "primary_weapon", None),
+            regime=getattr(record, "market_regime", None) or regime_map.get(pair, "UNKNOWN"),
+            htf_bias=getattr(record, "oracle_bias", None),
+            htf_alignment=self._htf_alignment(side, getattr(record, "oracle_bias", None)),
             offense_score=offense_score,
             defense_score=defense_score,
             trap_score=trap_score,
             confidence=confidence,
             score=score,
-            why_now=why_now[:220],
-            entry_idea=getattr(candidate, "entry_idea", None),
-            stop_idea=getattr(candidate, "stop_idea", None),
-            target_idea=getattr(candidate, "target_idea", None),
+            why_now=(getattr(record, "reason", "") or "Oracle panel state recognized")[:220],
+            entry_idea=None,
+            stop_idea=None,
+            target_idea=None,
             warnings=warnings,
             kill_reasons=kill_reasons,
-            tags=list(getattr(candidate, "tags", []) or []),
+            tags=tags,
             oracle_context=OracleRowContext(
-                timeframe=context.get("timeframe", "1h"),
-                session=context.get("session", self._get_session(now)),
+                timeframe=getattr(record, "timeframe", None) or oracle_context.get("timeframe", "1h"),
+                session=oracle_context.get("session", self._get_session(now)),
                 fear_greed=fg,
-                htf_bias=context.get("htf_bias"),
-                market_regime=regime_map.get(pair, "UNKNOWN"),
+                htf_bias=getattr(record, "oracle_bias", None),
+                market_regime=getattr(record, "market_regime", None) or regime_map.get(pair, "UNKNOWN"),
             ),
-            indicators=dict(context.get("pair_indicators", {}) or {}),
+            indicators=dict(oracle_context.get("indicators", {}) or oracle_context.get("pair_indicators", {}) or {}),
             diagnostics={
-                "intent": getattr(candidate, "intent", None),
-                "grade": getattr(candidate, "grade", None),
-                "review_decision": getattr(review, "decision", None),
-                "council_route": getattr(council, "route", None),
+                "board_state": board_state,
+                "primary_weapon": getattr(record, "primary_weapon", None),
+                "weapon_claim_count": len(claims),
+                "weapon_claims": claims,
+                "oracle_rsi_trend": getattr(record, "oracle_rsi_trend", None),
+                "oracle_structure_trend": getattr(record, "oracle_structure_trend", None),
+                "trap_state": getattr(record, "trap_state", None),
+                "pressure_state": getattr(record, "pressure_state", None),
             },
         )
+
+    def _trap_score_from_record(self, record: PanelStateRecord, claims: List[Dict[str, Any]]) -> float:
+        trap_state = str(getattr(record, "trap_state", "") or "").lower()
+        if trap_state in {"dead", "invalid", "blocked", "do_not_trade"}:
+            return 1.0
+        if trap_state in {"trap", "high_trap_risk", "retail_trap", "squeeze_risk", "fake_break_risk"}:
+            return 0.75
+
+        for claim in claims:
+            evidence = dict(claim.get("evidence", {}) or {})
+            if "trap_score" in evidence:
+                try:
+                    return float(evidence.get("trap_score") or 0.0)
+                except Exception:
+                    pass
+
+            context = dict(claim.get("context", {}) or {})
+            if "trap_score" in context:
+                try:
+                    return float(context.get("trap_score") or 0.0)
+                except Exception:
+                    pass
+
+        return 0.0
+
+    def _htf_alignment(self, side: str, bias: Any) -> str:
+        side_text = str(side or "").lower()
+        bias_text = str(bias or "").lower()
+
+        bullish = {"long", "buy", "bull", "bullish", "up"}
+        bearish = {"short", "sell", "bear", "bearish", "down"}
+
+        if side_text in bullish and bias_text in bullish:
+            return "aligned"
+        if side_text in bearish and bias_text in bearish:
+            return "aligned"
+        if side_text in bullish and bias_text in bearish:
+            return "counter"
+        if side_text in bearish and bias_text in bullish:
+            return "counter"
+        return "mixed"
 
     def _htf_bias_overview(
         self,
@@ -400,26 +437,6 @@ class TakScannerV4:
                 counts["mixed_pairs"] += 1
 
         return counts
-
-    def _candidate_action(self, candidate: Any) -> str:
-        council = getattr(candidate, "council", None)
-        review = getattr(candidate, "review", None)
-
-        if council is not None:
-            route = getattr(council, "route", None)
-            if route == "killed_signals":
-                return "kill"
-            if route == "caution_signals":
-                return "caution"
-
-        if review is not None:
-            decision = getattr(review, "decision", None)
-            if decision in {"reject", "kill", "drop"}:
-                return "kill"
-            if decision in {"caution", "watchlist", "wait"}:
-                return "caution"
-
-        return "signal"
 
     def _trim_last_signals(self) -> None:
         try:
@@ -471,18 +488,18 @@ class TakScannerV4:
             return "FEAR"
         return "DEAD"
 
-    def _regime_summary(self, fg: int, regime_map: Dict[str, str], candidates: List[Any]) -> str:
-        if not candidates:
+    def _regime_summary(self, fg: int, regime_map: Dict[str, str], panel_records: List[Any]) -> str:
+        if not panel_records:
             if fg < 35:
-                return "Fear-heavy tape with no qualified Oracle candidates"
-            return "Quiet tape with no qualified Oracle candidates"
+                return "Fear-heavy tape with no visible Oracle panel records"
+            return "Quiet tape with no visible Oracle panel records"
 
         regime_counts: Dict[str, int] = {}
         for regime in regime_map.values():
             regime_counts[regime] = regime_counts.get(regime, 0) + 1
 
         top_regime = max(regime_counts, key=regime_counts.get) if regime_counts else "UNKNOWN"
-        return f"{top_regime} dominant | FG {fg} | {len(candidates)} raw candidates"
+        return f"{top_regime} dominant | FG {fg} | {len(panel_records)} panel records"
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
