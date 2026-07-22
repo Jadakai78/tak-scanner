@@ -162,7 +162,7 @@ class TakScannerV4:
         logger.info("Oracle building contexts for %s active pairs", len(active))
 
         for pair in active:
-            ohlc_df = ...
+            ohlc_df = ...   # fetch candles/dataframe for this pair
             regime = self.classifier.classify(pair, ohlc_df, fg)
             regimemap[pair] = regime
             contexts.append(
