@@ -162,7 +162,7 @@ class TakScannerV4:
         logger.info("Oracle building contexts for %s active pairs", len(active))
 
         for pair in active:
-            regime = self.classifier.classify_pair(pair)
+            regime = self.classifier.classify(pair)
             regimemap[pair] = regime
             contexts.append(
                 PairContext(
