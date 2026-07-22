@@ -4,6 +4,12 @@ from typing import Any, Dict
 from uuid import uuid4
 
 from scannermodels import CandidateSignal, SpecialistObservation
+from scannercandidate_factory import build_candidate
+from scannermodels import CandidateSignal, PairContext, SpecialistObservation
+from scannercouncil import ScannerCouncil
+from scannerreviewer_remi import RemiReviewer
+
+
 
 
 def _clamp(value: float, low: float, high: float) -> float:
