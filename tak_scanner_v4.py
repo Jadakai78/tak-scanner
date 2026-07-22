@@ -15,7 +15,7 @@ from pairuniverse import PairUniverse
 from regimeclassifier import RegimeClassifier
 from remi import Remi
 from signalbus import SignalBus
-from strategies import ENGINECLASSES, REGIMEENGINES
+from strategies import ENGINE_CLASSES, REGIME_ENGINES
 from gimbaformatter import format_gimba_message
 from scannermodels import PairContext
 from scannerorchestrator import ScannerOrchestrator
