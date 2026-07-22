@@ -337,10 +337,10 @@ class ScannerOrchestrator:
         if self._bias_conflicts(lead.side, oracle_bias) and float(lead.confidence) < 0.85:
             return "caution"
 
-        if float(lead.score) >= 8.0 and float(lead.confidence) >= 0.75:
+        if float(lead.score) >= 6.5 and float(lead.confidence) >= 0.60:
             return "execute"
 
-        if float(lead.score) >= 5.5 and float(lead.confidence) >= 0.45:
+        if float(lead.score) >= 4.5 and float(lead.confidence) >= 0.40:
             return "caution"
 
         return "wait"
