@@ -21,10 +21,11 @@ class OracleRunner:
     def run_once(self) -> Dict[str, Any]:
         payload = self.scanner.run_scan()
         logger.info(
-            "OracleRunner completed scan | last_scan=%s | signals=%s | killed=%s",
-            payload.get("last_scan") or payload.get("lastscan"),
-            len(payload.get("signals", [])),
-            len(payload.get("killedsignals", [])),
+            "OracleRunner completed scan | last_scan=%s | opportunities=%s | watchlist=%s | killed=%s",
+            payload.get("last_scan"),
+            len(payload.get("opportunities", [])),
+            len(payload.get("watchlist", [])),
+            len(payload.get("killed", [])),
         )
         return payload
 
