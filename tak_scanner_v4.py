@@ -16,7 +16,7 @@ from regimeclassifier import RegimeClassifier
 from remi import Remi
 from signalbus import SignalBus
 from strategies import ENGINE_CLASSES, REGIME_ENGINES
-from gimbaformatter import format_gimba_message
+from gimba_formatter import format_gimba_message
 from scannermodels import PairContext
 from scannerorchestrator import ScannerOrchestrator
 from scannerspecialistregistry import SpecialistRegistry
