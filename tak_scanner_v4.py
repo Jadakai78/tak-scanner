@@ -2,12 +2,12 @@ from __future__ import annotations
 
 import json
 import logging
-from collections import Counter
+import os
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
-import pandas as pd
+import boto3
 import requests
 
 from convictionscorer import ConvictionScorer
@@ -15,44 +15,46 @@ from pairuniverse import PairUniverse
 from regimeclassifier import RegimeClassifier
 from remi import Remi
 from signalbus import SignalBus
-from strategies import ENGINE_CLASSES, REGIME_ENGINES
+from strategies import ENGINECLASSES, REGIMEENGINES
+from gimbaformatter import format_gimba_message
 from scannermodels import PairContext
-from scannerorchestrator import PanelStateRecord, ScannerOrchestrator
-from scannerspecialist_registry import SpecialistRegistry
-from oracle_schema import (
+from scannerorchestrator import ScannerOrchestrator
+from scannerspecialistregistry import SpecialistRegistry
+from oracleschema import (
     OracleHealth,
-    OracleMarket,
-    OraclePanel,
-    OraclePanelPayload,
-    OraclePanelRow,
-    OracleRowContext,
+    OraclePayload,
     OracleSummary,
-    build_panel_payload,
+    payload_from_actions,
+    make_oracle_action,
+    SEATS,
 )
 
-SEATS = [
-    {"name": "Dragon", "risk": 177, "mode": "FULL_AGGRESSION"},
-    {"name": "Starter3", "risk": 130, "mode": "FULL_AGGRESSION"},
-    {"name": "Starter2", "risk": 66, "mode": "FULL_AGGRESSION"},
-    {"name": "Eval1", "risk": 13, "mode": "PROTECT_ONLY"},
-]
-
-PROPS_PAIRS = {
-    "BTC", "ETH", "SOL", "HYPE", "XRP", "ZEC", "SUI", "ADA", "DOGE", "AAVE",
-    "LTC", "TAO", "LINK", "UNI", "NEAR", "ARB", "ONDO", "TRX", "AVAX", "DOT",
-    "BCH", "PUMP", "CRV", "ALGO", "TIA", "HBAR", "WLD", "FARTCOIN", "POL", "XPL",
-    "WIF", "BNB", "INJ", "FIL", "JUP", "ATOM", "LDO", "PENGU", "VIRTUAL", "RENDER",
-    "JTO", "GRASS", "KAITO", "TRUMP", "ASTER", "OP", "POPCAT", "APT", "S", "STX",
-    "ETC", "MOODENG", "PNUT", "AIXBT",
-}
-
 logger = logging.getLogger(__name__)
+
 MODULE_DIR = Path(__file__).resolve().parent
+
 FG_URL = "https://api.alternative.me/fng/"
+
 SCAN_HOURS_UTC = [14, 18, 22, 2, 6, 10]
 SCAN_MINUTE_UTC = 0
+
+INTENT_RANK = {
+    "EVICTION_NOTICE": 1,
+    "POWER_PLAY": 2,
+    "STRUCTURE_BREAK": 3,
+    "SA_DELTA": 4,
+    "B_DELTA": 5,
+    "STARTER_DELTA": 6,
+}
+
+MAX_SAMMY_ALERTS = 5
 SIGNAL_TTL_HOURS = 48
-BUS_PATH = Path("/app/data/signal_bus.json") if Path("/app/data").exists() else MODULE_DIR / "signal_bus.json"
+
+BUS_PATH = (
+    Path("/app/data/signal_bus.json")
+    if Path("/app/data").exists()
+    else MODULE_DIR / "signal_bus.json"
+)
 
 
 def write_bus_snapshot(payload: Dict[str, Any], output_path: Path) -> None:
@@ -66,8 +68,42 @@ def write_bus_snapshot(payload: Dict[str, Any], output_path: Path) -> None:
         raise
 
 
+def upload_bus_snapshot_to_r2(local_path: Path, object_name: str = "signal_bus.json") -> None:
+    """
+    Upload the bus snapshot JSON to Cloudflare R2 using S3-compatible boto3 client.
+
+    Expects these environment variables (already set in Railway):
+      - R2_ACCOUNT_ID
+      - R2_ACCESS_KEY_ID
+      - R2_SECRET_ACCESS_KEY
+      - R2_BUCKET_NAME
+    """
+    try:
+        account_id = os.environ["R2_ACCOUNT_ID"]
+        access_key_id = os.environ["R2_ACCESS_KEY_ID"]
+        secret_access_key = os.environ["R2_SECRET_ACCESS_KEY"]
+        bucket_name = os.environ["R2_BUCKET_NAME"]
+
+        client = boto3.client(
+            "s3",
+            endpoint_url=f"https://{account_id}.r2.cloudflarestorage.com",
+            aws_access_key_id=access_key_id,
+            aws_secret_access_key=secret_access_key,
+            region_name="auto",
+        )
+
+        client.upload_file(str(local_path), bucket_name, object_name)
+        logger.info(
+            "Bus snapshot uploaded to R2 bucket=%s object=%s",
+            bucket_name,
+            object_name,
+        )
+    except Exception as e:
+        logger.exception("Failed to upload bus snapshot to R2: %s", e)
+
+
 class TakScannerV4:
-    def __init__(self):
+    def __init__(self) -> None:
         self.scorer = ConvictionScorer()
         self.remi = Remi()
         self.bus = SignalBus(path=BUS_PATH)
@@ -76,23 +112,27 @@ class TakScannerV4:
         self.last_signals: List[Dict[str, Any]] = []
 
         try:
-            registry = SpecialistRegistry.from_engine_map(ENGINE_CLASSES, REGIME_ENGINES)
+            registry = SpecialistRegistry.from_engine_map(ENGINECLASSES, REGIMEENGINES)
         except Exception:
             registry = SpecialistRegistry()
             try:
-                registry = registry.from_engine_map(ENGINE_CLASSES, REGIME_ENGINES)
+                registry = registry.from_engine_map(ENGINECLASSES, REGIMEENGINES)
             except Exception as e:
-                logger.exception("Failed to build SpecialistRegistry from engine map: %s", e)
+                logger.exception(
+                    "Failed to build SpecialistRegistry from engine map: %s", e
+                )
                 registry = SpecialistRegistry()
 
         self.orchestrator = ScannerOrchestrator(specialist_registry=registry)
 
     def next_scan_time(self, now: datetime) -> datetime:
-        candidates = []
+        candidates: List[datetime] = []
         for hour in SCAN_HOURS_UTC:
-            candidate = now.replace(hour=hour, minute=SCAN_MINUTE_UTC, second=0, microsecond=0)
+            candidate = now.replace(
+                hour=hour, minute=SCAN_MINUTE_UTC, second=0, microsecond=0
+            )
             if candidate <= now:
-                candidate += timedelta(days=1)
+                candidate = candidate + timedelta(days=1)
             candidates.append(candidate)
         return min(candidates)
 
@@ -100,7 +140,8 @@ class TakScannerV4:
         try:
             resp = requests.get(FG_URL, timeout=10)
             resp.raise_for_status()
-            return int(resp.json()["data"][0]["value"])
+            data = resp.json()
+            return int(data["data"][0]["value"])
         except Exception as e:
             logger.warning("FG fetch failed: %s", e)
             return 50
@@ -110,340 +151,168 @@ class TakScannerV4:
         logger.info("Starting Oracle-first scan at %s", now.isoformat())
 
         fg = self.fetch_fear_greed()
-        fg_score = fg
+        active = self.universe.get_active_pairs()
+        dead_count = max(len(getattr(self.universe, "pairs", [])) - len(active), 0)
 
-        raw_active = self.universe.get_active_pairs()
-        active = [
-            item for item in raw_active
-            if isinstance(item, dict) and item.get("pair") in PROPS_PAIRS
-        ]
-        dead_count = max(len(raw_active) - len(active), 0)
-
-        regime_map: Dict[str, str] = {}
+        regimemap: Dict[str, str] = {}
         contexts: List[PairContext] = []
 
-        logger.info("Props filter kept %s of %s active pairs", len(active), len(raw_active))
         logger.info("Oracle building contexts for %s active pairs", len(active))
 
-        for item in active:
-            pair = item.get("pair")
-            rows = item.get("ohlc_4h", [])
-
-            if not pair:
-                logger.warning("Skipping active item with no pair: %s", item)
-                continue
-            if not rows:
-                logger.warning("Skipping %s due to missing ohlc_4h", pair)
-                continue
-
-            try:
-                ohlc_df = pd.DataFrame(
-                    rows,
-                    columns=["time", "open", "high", "low", "close", "vwap", "volume", "count"],
-                )
-                for col in ["open", "high", "low", "close", "vwap", "volume"]:
-                    ohlc_df[col] = pd.to_numeric(ohlc_df[col], errors="coerce")
-                ohlc_df["time"] = pd.to_numeric(ohlc_df["time"], errors="coerce")
-                ohlc_df = ohlc_df.dropna().reset_index(drop=True)
-
-                regime = self.classifier.classify(pair, ohlc_df, fg_score)
-            except Exception as e:
-                logger.warning("Skipping %s due to regime prep failure: %s", pair, e)
-                continue
-
-            regime_map[pair] = regime
+        for pair in active:
+            regime = self.classifier.classify_pair(pair)
+            regimemap[pair] = regime
             contexts.append(
                 PairContext(
                     pair=pair,
                     market_regime=regime,
                     timeframe="1h",
                     fear_greed=fg,
-                    session=self._get_session(now),
-                    indicators={},
-                    market_state={},
+                    session=None,
+                    indicators=None,
+                    market_state=None,
+                    shared_state=None,
                 )
             )
 
-        regime_counts = dict(Counter(regime_map.values()))
-        logger.info("Regime counts: %s", regime_counts)
-
-        shared_state = {"fgscore": fg, "timeframe": "1h"}
         logger.info("Oracle calling orchestrator with %s contexts", len(contexts))
-        panel_records = self.orchestrator.run(contexts, shared_state)
-        logger.info("Oracle orchestrator returned %s panel records", len(panel_records))
+        candidates = self.orchestrator.run(contexts, shared_state=None)
+        logger.info("Oracle orchestrator returned %s candidates", len(candidates))
 
-        opportunities: List[OraclePanelRow] = []
-        watchlist: List[OraclePanelRow] = []
-        killed: List[OraclePanelRow] = []
+        oracle_actions: List[Any] = []
+        action_priority = {"signal": 0, "caution": 1, "kill": 2, "flat": 3}
 
-        for record in panel_records:
-            row = self._panel_record_to_row(record, regime_map, fg, now)
-            state = row.action_state
+        for candidate in candidates:
+            action_type = self.candidate_action(candidate)
+            reason = getattr(candidate, "thesis", "").strip() or "Oracle setup recognized"
 
-            if state == "actionable":
-                opportunities.append(row)
-            elif state == "watch":
-                watchlist.append(row)
-            elif state == "killed":
-                killed.append(row)
-
-        def row_sort_key(row: OraclePanelRow):
-            return (
-                -float(row.score or 0.0),
-                -float(row.confidence or 0.0),
-                float(row.trap_score or 0.0),
+            oracle_action = make_oracle_action(
+                pair=getattr(candidate, "pair", "UNKNOWN"),
+                action=action_type,
+                timestamp=now.isoformat(),
+                setup_family=getattr(candidate, "setup_type", None),
+                side=getattr(candidate, "side", None),
+                confidence=float(getattr(candidate, "confidence", 0.0) or 0.0),
+                score=float(getattr(candidate, "score", 0.0) or 0.0),
+                why_now=reason[:220],
+                entry_idea=getattr(candidate, "entry_idea", None),
+                stop_idea=getattr(candidate, "stop_idea", None),
+                target_idea=getattr(candidate, "target_idea", None),
+                tags=list(getattr(candidate, "tags", []) or []),
+                warnings=list(getattr(candidate, "warnings", []) or []),
+                context_regime=regimemap.get(getattr(candidate, "pair", ""), "UNKNOWN"),
+                fg=fg,
+                specialist=getattr(candidate, "specialist", None),
+                intent=getattr(candidate, "intent", None),
+                grade=getattr(candidate, "grade", None),
             )
 
-        opportunities.sort(key=row_sort_key)
-        watchlist.sort(key=row_sort_key)
-        killed.sort(key=row_sort_key)
+            oracle_actions.append(oracle_action)
 
-        for i, row in enumerate(opportunities, start=1):
-            row.panel_rank = i
-        for i, row in enumerate(watchlist, start=1):
-            row.panel_rank = i
-        for i, row in enumerate(killed, start=1):
-            row.panel_rank = i
+        oracle_actions.sort(
+            key=lambda a: (
+                action_priority.get(a.action, 99),
+                -float(a.score or 0.0),
+                -float(a.confidence or 0.0),
+            )
+        )
 
-        top_regime = max(regime_counts, key=regime_counts.get) if regime_counts else "UNKNOWN"
-        session = self._get_session(now)
-        market_phase = self._market_phase(fg, len(opportunities))
+        filtered_actions = [
+            a
+            for a in oracle_actions
+            if a.action != "signal" or float(a.score or 0.0) >= 0.70
+        ]
 
         summary = OracleSummary(
-            pairs_scanned=len(active),
-            opportunity_count=len(opportunities),
-            watchlist_count=len(watchlist),
-            killed_count=len(killed),
-            top_regime=top_regime,
-            market_phase=market_phase,
-            active_session=session,
+            fg=fg,
+            fg_label=self.fg_label(fg),
+            market_phase=self.market_phase(fg, len(filtered_actions)),
+            session=self.get_session(now),
+            regime_summary=self.regime_summary(fg, regimemap, filtered_actions),
+            active_pairs=len(active),
+            dead_pairs=dead_count,
             scan_mode="scheduled",
         )
 
-        market = OracleMarket(
-            fear_greed=fg,
-            fear_greed_label=self._fg_label(fg),
-            session=session,
-            market_phase=market_phase,
-            regime_counts=regime_counts,
-            htf_bias_overview=self._htf_bias_overview(opportunities, watchlist, killed),
-            notes=[self._regime_summary(fg, regime_map, panel_records)],
-        )
-
-        panel = OraclePanel(
-            default_sort="panel_rank",
-            default_view="opportunities",
-            notes=["Panel-first Oracle build. External alerts disabled."],
-        )
-
         health = OracleHealth(
-            writer_ok=True,
-            reader_ok=True,
+            scheduler_ok=True,
+            bus_ok=True,
             publish_ok=True,
-            api_ready=True,
             last_error=None,
             source_path=str(self.bus.path),
-            bus_path=str(self.bus.path),
             heartbeat=now.isoformat(),
         )
 
-        payload_obj: OraclePanelPayload = build_panel_payload(
-            generated_at=now.isoformat(),
-            last_scan=now.isoformat(),
-            next_scan=self.next_scan_time(now).isoformat(),
-            summary=summary,
-            market=market,
-            panel=panel,
-            opportunities=opportunities,
-            watchlist=watchlist,
-            killed=killed,
-            health=health,
+        payload_obj = OraclePayload(
+            payload_from_actions(
+                last_scan=now.isoformat(),
+                next_scan=self.next_scan_time(now).isoformat(),
+                oracle_summary=summary,
+                actions=filtered_actions,
+                positions=[],
+                health=health,
+            )
         )
 
         payload = payload_obj.to_dict()
-        payload["sessionstats"] = {
+        payload["payload_last_scan"] = payload.get("last_scan")
+        payload["payload_next_scan"] = payload.get("next_scan")
+        payload["payload_fg"] = fg
+        payload["payload_active_pairs"] = len(active)
+        payload["payload_dead_pairs"] = dead_count
+        payload["payload_regime_map"] = regimemap
+        payload["payload_session_stats"] = {
             "scanned": len(active),
-            "opportunities": len(opportunities),
-            "watchlist": len(watchlist),
-            "killed": len(killed),
-            "dead_pairs_filtered_outside_props": dead_count,
+            "actions": len(filtered_actions),
+            "signals": len(payload.get("signals", [])),
+            "killed": len(payload.get("killed_signals", [])),
         }
-        payload["regime_map"] = regime_map
-        payload["quiet_hours"] = now.hour not in SCAN_HOURS_UTC
-        payload["sprint_mode"] = False
+        payload["payload_quiet_hours"] = now.hour not in SCAN_HOURS_UTC
+        payload["payload_sprint_mode"] = False
 
-        self._trim_last_signals()
-        self.last_signals = [row.to_dict() for row in opportunities]
+        self.trim_last_signals()
+        self.last_signals.extend(payload.get("signals", []))
 
         write_bus_snapshot(payload, self.bus.path)
+        upload_bus_snapshot_to_r2(self.bus.path)
+
+        self.fire_alerts(payload.get("signals", [])[:MAX_SAMMY_ALERTS])
 
         logger.info(
-            "Oracle scan complete: %s opportunities | %s watchlist | %s killed",
-            len(opportunities),
-            len(watchlist),
-            len(killed),
+            "Oracle scan complete %s actions %s signals %s killed",
+            len(filtered_actions),
+            len(payload.get("signals", [])),
+            len(payload.get("killed_signals", [])),
         )
+
         return payload
 
-    def _panel_record_to_row(
-        self,
-        record: PanelStateRecord,
-        regime_map: Dict[str, str],
-        fg: int,
-        now: datetime,
-    ) -> OraclePanelRow:
-        oracle_context = getattr(record, "oracle_context", {}) or {}
-        claims = list(getattr(record, "weapon_claims", []) or [])
-        lead_claim = claims[0] if claims else {}
+    def candidate_action(self, candidate: Any) -> str:
+        council = getattr(candidate, "council", None)
+        review = getattr(candidate, "review", None)
 
-        board_state = str(getattr(record, "board_state", "wait") or "wait").lower()
-        action_state = {
-            "execute": "actionable",
-            "caution": "watch",
-            "wait": "watch",
-            "dead": "killed",
-        }.get(board_state, "watch")
+        if council is not None:
+            route = getattr(council, "route", None)
+            if route == "killed_signals":
+                return "kill"
+            if route == "caution_signals":
+                return "caution"
 
-        pair = getattr(record, "pair", "UNKNOWN")
-        side = str(getattr(record, "side", "neutral") or "neutral").lower()
-        score = float(getattr(record, "score", 0.0) or 0.0)
-        confidence = float(getattr(record, "confidence", 0.0) or 0.0)
-        trap_score = self._trap_score_from_record(record, claims)
-        offense_score = float(lead_claim.get("score", score) or score)
-        defense_score = max(0.0, round(confidence - trap_score, 4))
+        if review is not None:
+            decision = getattr(review, "decision", None)
+            if decision in ("reject", "kill", "drop"):
+                return "kill"
+            if decision in ("caution", "watchlist", "wait"):
+                return "caution"
 
-        warnings = list(getattr(record, "warnings", []) or [])
-        tags = list(getattr(record, "tags", []) or [])
+        return "signal"
 
-        kill_reasons = []
-        if action_state == "killed":
-            kill_reasons.append(getattr(record, "trap_state", None) or "dead_panel_state")
-
-        return OraclePanelRow(
-            pair=pair,
-            panel_rank=0,
-            action_state=action_state,
-            side=side,
-            setup_family=lead_claim.get("setup_type"),
-            specialist=getattr(record, "primary_weapon", None),
-            regime=getattr(record, "market_regime", None) or regime_map.get(pair, "UNKNOWN"),
-            htf_bias=getattr(record, "oracle_bias", None),
-            htf_alignment=self._htf_alignment(side, getattr(record, "oracle_bias", None)),
-            offense_score=offense_score,
-            defense_score=defense_score,
-            trap_score=trap_score,
-            confidence=confidence,
-            score=score,
-            why_now=(getattr(record, "reason", "") or "Oracle panel state recognized")[:220],
-            entry_idea=None,
-            stop_idea=None,
-            target_idea=None,
-            warnings=warnings,
-            kill_reasons=kill_reasons,
-            tags=tags,
-            oracle_context=OracleRowContext(
-                timeframe=getattr(record, "timeframe", None) or oracle_context.get("timeframe", "1h"),
-                session=oracle_context.get("session", self._get_session(now)),
-                fear_greed=fg,
-                htf_bias=getattr(record, "oracle_bias", None),
-                market_regime=getattr(record, "market_regime", None) or regime_map.get(pair, "UNKNOWN"),
-            ),
-            indicators=dict(oracle_context.get("indicators", {}) or oracle_context.get("pair_indicators", {}) or {}),
-            diagnostics={
-                "board_state": board_state,
-                "primary_weapon": getattr(record, "primary_weapon", None),
-                "weapon_claim_count": len(claims),
-                "weapon_claims": claims,
-                "oracle_rsi_trend": getattr(record, "oracle_rsi_trend", None),
-                "oracle_structure_trend": getattr(record, "oracle_structure_trend", None),
-                "trap_state": getattr(record, "trap_state", None),
-                "pressure_state": getattr(record, "pressure_state", None),
-            },
-        )
-
-    def _trap_score_from_record(self, record: PanelStateRecord, claims: List[Dict[str, Any]]) -> float:
-        trap_state = str(getattr(record, "trap_state", "") or "").lower()
-        if trap_state in {"dead", "invalid", "blocked", "do_not_trade"}:
-            return 1.0
-        if trap_state in {"trap", "high_trap_risk", "retail_trap", "squeeze_risk", "fake_break_risk"}:
-            return 0.75
-
-        for claim in claims:
-            evidence = dict(claim.get("evidence", {}) or {})
-            if "trap_score" in evidence:
-                try:
-                    return float(evidence.get("trap_score") or 0.0)
-                except Exception:
-                    pass
-
-            context = dict(claim.get("context", {}) or {})
-            if "trap_score" in context:
-                try:
-                    return float(context.get("trap_score") or 0.0)
-                except Exception:
-                    pass
-
-        return 0.0
-
-    def _htf_alignment(self, side: str, bias: Any) -> str:
-        side_text = str(side or "").lower()
-        bias_text = str(bias or "").lower()
-
-        bullish = {"long", "buy", "bull", "bullish", "up"}
-        bearish = {"short", "sell", "bear", "bearish", "down"}
-
-        if side_text in bullish and bias_text in bullish:
-            return "aligned"
-        if side_text in bearish and bias_text in bearish:
-            return "aligned"
-        if side_text in bullish and bias_text in bearish:
-            return "counter"
-        if side_text in bearish and bias_text in bullish:
-            return "counter"
-        return "mixed"
-
-    def _htf_bias_overview(
-        self,
-        opportunities: List[OraclePanelRow],
-        watchlist: List[OraclePanelRow],
-        killed: List[OraclePanelRow],
-    ) -> Dict[str, int]:
-        counts = {"bullish_pairs": 0, "bearish_pairs": 0, "mixed_pairs": 0}
-        seen: Dict[str, str] = {}
-
-        for row in [*opportunities, *watchlist, *killed]:
-            if not row.pair:
-                continue
-            bias = (row.htf_bias or "").lower().strip()
-            if bias in {"bullish", "long"}:
-                current = "bullish"
-            elif bias in {"bearish", "short"}:
-                current = "bearish"
-            else:
-                current = "mixed"
-
-            prior = seen.get(row.pair)
-            if prior and prior != current:
-                seen[row.pair] = "mixed"
-            else:
-                seen[row.pair] = current
-
-        for state in seen.values():
-            if state == "bullish":
-                counts["bullish_pairs"] += 1
-            elif state == "bearish":
-                counts["bearish_pairs"] += 1
-            else:
-                counts["mixed_pairs"] += 1
-
-        return counts
-
-    def _trim_last_signals(self) -> None:
+    def trim_last_signals(self) -> None:
         try:
             cutoff = datetime.now(timezone.utc) - timedelta(hours=SIGNAL_TTL_HOURS)
             trimmed: List[Dict[str, Any]] = []
             for signal in self.last_signals:
-                ts = signal.get("timestamp") or signal.get("generated_at") or signal.get("last_scan")
+                ts = signal.get("timestamp")
                 if not ts:
                     continue
                 try:
@@ -458,18 +327,29 @@ class TakScannerV4:
         except Exception:
             logger.debug("Failed to trim last_signals")
 
-    def _fg_label(self, fg: int) -> str:
-        if fg < 25:
+    def fire_alerts(self, top_signals: List[Dict[str, Any]]) -> None:
+        for signal in top_signals:
+            try:
+                message = format_gimba_message(signal)
+                logger.info(
+                    "Alert fired for %s", signal.get("pair", "unknown")
+                )
+                logger.debug("Alert payload preview %s", message[:240])
+            except Exception as e:
+                logger.exception("Alert failed: %s", e)
+
+    def fg_label(self, fg: int) -> str:
+        if fg <= 25:
             return "Extreme Fear"
-        if fg < 45:
+        if fg <= 45:
             return "Fear"
-        if fg < 55:
+        if fg <= 55:
             return "Neutral"
-        if fg < 75:
+        if fg <= 75:
             return "Greed"
         return "Extreme Greed"
 
-    def _get_session(self, now: datetime) -> str:
+    def get_session(self, now: datetime) -> str:
         hour = now.hour
         if 0 <= hour < 8:
             return "Asia"
@@ -477,29 +357,38 @@ class TakScannerV4:
             return "London"
         return "NY"
 
-    def _market_phase(self, fg: int, opportunity_count: int) -> str:
-        if opportunity_count >= 10:
+    def market_phase(self, fg: int, signal_count: int) -> str:
+        if signal_count >= 10:
             return "HOT"
-        if opportunity_count >= 5:
+        if signal_count >= 5:
             return "WARM"
-        if opportunity_count >= 1:
+        if signal_count >= 1:
             return "COLD"
-        if fg < 35:
+        if fg <= 35:
             return "FEAR"
         return "DEAD"
 
-    def _regime_summary(self, fg: int, regime_map: Dict[str, str], panel_records: List[Any]) -> str:
-        if not panel_records:
-            if fg < 35:
-                return "Fear-heavy tape with no visible Oracle panel records"
-            return "Quiet tape with no visible Oracle panel records"
+    def regimesummary(
+        self,
+        fg: int,
+        regimemap: Dict[str, str],
+        actions: List[Any],
+    ) -> str:
+        if not actions:
+            if fg <= 35:
+                return "Fear-heavy tape with no qualified Oracle actions"
+            return "Quiet tape with no qualified Oracle actions"
 
-        regime_counts: Dict[str, int] = {}
-        for regime in regime_map.values():
-            regime_counts[regime] = regime_counts.get(regime, 0) + 1
+        regimecounts: Dict[str, int] = {}
+        for regime in regimemap.values():
+            regimecounts[regime] = regimecounts.get(regime, 0) + 1
 
-        top_regime = max(regime_counts, key=regime_counts.get) if regime_counts else "UNKNOWN"
-        return f"{top_regime} dominant | FG {fg} | {len(panel_records)} panel records"
+        topregime = max(regimecounts, key=regimecounts.get) if regimecounts else "UNKNOWN"
+        signalcount = len([a for a in actions if getattr(a, "action", None) == "signal"])
+        cautioncount = len([a for a in actions if getattr(a, "action", None) == "caution"])
+
+        return f"{topregime} dominant FG {fg} signalcount {signalcount} signals cautioncount {cautioncount} cautions"
+
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
